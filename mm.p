@@ -92,7 +92,6 @@ END.
         RUN zundArt      IN mm-pp-handle.
         RUN logs         IN mm-pp-handle (1,"MM-ZundArt","","","").
      
-        RUN zundSend     IN mm-pp-handle ("","").
         RUN logs         IN mm-pp-handle (1,"MM-ZundSend","","","").
     END.
     

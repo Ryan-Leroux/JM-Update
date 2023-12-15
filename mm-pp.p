@@ -5215,12 +5215,17 @@ END PROCEDURE.
 
 
 PROCEDURE Resets:
-    DEFINE INPUT PARAMETER purge      AS LOG  NO-UNDO.
-    DEFINE INPUT PARAMETER blankslate AS LOG NO-UNDO.
+/*------------------------------------------------------------------------------
+ Purpose: Determine what files/folders need deleted before JM starts batching
+ 
+ INPUTS  pPurge: Is this a full run? (Y/N)       
+ 
+ Notes:
+------------------------------------------------------------------------------*/
+    DEFINE INPUT PARAMETER pPurge      AS LOG  NO-UNDO.
 
-    DEFINE VARIABLE delme           AS LOG  NO-UNDO.
-    DEFINE VARIABLE delme2          AS LOG  NO-UNDO.
-    DEFINE VARIABLE cnt             AS INT  NO-UNDO.
+    DEFINE VARIABLE DelMe           AS LOG  NO-UNDO.
+    
     DEFINE VARIABLE tmpcmd          AS CHAR NO-UNDO.
     DEFINE VARIABLE tmpRunSeq       AS INT  NO-UNDO.
     DEFINE VARIABLE templateCnt     AS INT  NO-UNDO.
@@ -5247,32 +5252,11 @@ PROCEDURE Resets:
     EMPTY TEMP-TABLE ttDel.
     EMPTY TEMP-TABLE saves.
 
-    RUN sethomefolder.
-    /*get all files in hotfolders*/
-    FOR EACH pt_hotfolder NO-LOCK:
-        cpathway = cHomeFolder + "\" + entry((NUM-ENTRIES(pt_hotfolder.pathway,"\") - 1),pt_hotfolder.pathway,"\") + "\" + entry(NUM-ENTRIES(pt_hotfolder.pathway,"\"),pt_hotfolder.pathway,"\") + "\".
-       
-        IF NOT CAN-FIND(FIRST hFolder WHERE hFolder.path = cpathway) THEN DO:
-            CREATE hFolder.
-            ASSIGN hFolder.path = cpathway.
-        END.
+    /* Set DB & Folder Locations */
+    RUN SetHomeFolder.
+
         
-        FILE-INFO:FILE-NAME = cpathway.
-        IF FILE-INFO:FULL-PATHNAME <> ? THEN DO:
-            INPUT FROM OS-DIR(cpathway).
-            IMPORT ^.
-            IMPORT ^.
-            REPEAT:
-                IMPORT fname.
-                FILE-INFO:FILE-NAME  = fname.
-                CREATE idet.
-                ASSIGN idet.iname    = fname
-                       idet.iPathway = cpathway + fname.
-            END.
-        END.
-    END.
-        
-    IF blankSlate = YES THEN DO:
+    IF pPurge = TRUE THEN DO:
         /*reset records so they delete*/
         FOR EACH sign_mm_hdr WHERE sign_mm_hdr.RUN_date = ? BY sign_mm_hdr.runseq:
             IF sign_mm_hdr.qty_printed > 0 THEN 
@@ -5281,13 +5265,12 @@ PROCEDURE Resets:
                 ASSIGN sign_mm_hdr.SAVE_bed = YES. /*save reprints*/
             ELSE 
                 ASSIGN sign_mm_hdr.save_bed = NO.
-                
+            
+            /* Default Corex batches to be deleted to maximize PC beds */    
             IF INDEX(sign_mm_hdr.matltype,"Corex") > 0 THEN sign_mm_hdr.save_bed = NO.
         END.
     END.
-
-    /*tells it to keep full beds and only rebuild partials*/
-    IF blankSlate = NO THEN DO:
+    ELSE DO:
         FOR EACH sign_mm_hdr WHERE sign_mm_hdr.RUN_date = ? BY sign_mm_hdr.runseq:
             IF NOT sign_mm_hdr.matltype = "template" THEN DO:
                 rFlag = NO.
@@ -5332,7 +5315,7 @@ PROCEDURE Resets:
     /*******************************/
     /****Folder Maintenance*********/
     /*******************************/
-    IF blankSlate = YES THEN DO:
+    IF pPurge = YES THEN DO:
         FILE-INFO:FILE-NAME = cHomeFolder.
         /*remove all images inside the mtl1 folders*/
         RUN removeFiles(cHomeFolder).
@@ -5427,10 +5410,8 @@ PROCEDURE Resets:
     /*******************************/
 
     /*Delete batches we are not keeping*/
-    cnt = 0.
     FOR EACH sign_mm_hdr WHERE sign_mM_hdr.RUN_date = ?:
-        ASSIGN Delme  = TRUE
-               Delme2 = TRUE .
+        ASSIGN Delme  = TRUE.
                
         IF sign_mm_hdr.SAVE_bed = YES THEN delme = FALSE. 
         IF CAN-FIND (FIRST sign_mm_det WHERE sign_mm_det.batchseq = sign_mm_hdr.batchseq AND sign_mm_det.itemseq = 0) THEN delme = TRUE.
@@ -5731,13 +5712,17 @@ END PROCEDURE.
 
 
 PROCEDURE SetHomeFolder:
-
+/*------------------------------------------------------------------------------
+ Purpose: Update the folder structure for Batches & Images
+ 
+ 
+ Notes:
+------------------------------------------------------------------------------*/
     RUN getDBase.
-    IF cDBase <> "Live" THEN DO:
-          ASSIGN cHomeFolder  = imageShare + "AgentPhotos\temporary\mtl1-Test"
-                 cRanFolder   = imageShare + "AgentPhotos\temporary\CS6-Test\CompletedBatches"
-                 cBatchImgLoc = imageShare + "AgentPhotos\temporary\CS6-Test".
-    END.
+    
+    ASSIGN cHomeFolder  = imageShare + "AgentPhotos\temporary\mtl1" + (IF cDBase <> "LIVE" THEN ("-" + cDBase) ELSE "")
+           cRanFolder   = imageShare + "AgentPhotos\temporary\"     + (IF cDBase <> "LIVE" THEN ("-" + cDBase) ELSE "") + "\CompletedBatches"
+           cBatchImgLoc = imageShare + "AgentPhotos\temporary\CS6"  + (IF cDBase <> "LIVE" THEN ("-" + cDBase) ELSE "")
                                            
 END PROCEDURE.
 

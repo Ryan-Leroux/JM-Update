@@ -44,29 +44,30 @@ DEFINE {1} SHARED TEMP-TABLE print_det NO-UNDO
     FIELD pItem       AS INT.
 
 
-PROCEDURE checkIn:
-    DEFINE INPUT PARAMETER cType AS CHAR NO-UNDO.
-    IF cType = "Start" THEN DO:
-        c_to_addr = "progressgroup@lowen.com".
-        ASSIGN c_subject     = "MM-CheckIn"
-               c_msg         = "Media Manager started running as of " + STRING(TIME, "HH:MM:SS").
-        RUN mgemail.p ("Bullseye Database",c_to_addr,"","",c_subject,c_msg,"",FALSE).
-    END.
-    ELSE IF cType = "Lock" THEN DO:
-        c_to_addr = "progressgroup@lowen.com".
-        ASSIGN c_subject     = "JM Lock"
-               c_msg         = "Active Lock as of " + STRING(TIME, "HH:MM:SS").
-        RUN mgemail.p ("Bullseye Database",c_to_addr,"","",c_subject,c_msg,"",FALSE).
-    END.
-    ELSE DO:
-        IF TIME - iCheckIn > 900 THEN DO:
-            c_to_addr = "progressgroup@lowen.com".
-            ASSIGN c_subject     = "MM-CheckIn"
-                   c_msg         = "Media Manager is still running as of " + STRING(TIME, "HH:MM:SS").
-            RUN mgemail.p ("Bullseye Database",c_to_addr,"","",c_subject,c_msg,"",FALSE).
-            iCheckIn = TIME.
+PROCEDURE CheckIn:
+/*------------------------------------------------------------------------------
+ Purpose: Send out JM "Check Up" emails
+ 
+ INPUTS: pType: Which type of check up email do we need to send?
+ 
+ Notes:
+------------------------------------------------------------------------------*/
+    DEFINE INPUT PARAMETER pType AS CHAR NO-UNDO.
+    
+    CASE pType:
+        WHEN "Start" THEN ASSIGN c_to_addr = "progressgroup@lowen.com"
+                                 c_subject = "MM-CheckIn"
+                                 c_msg     = "Job Manager Started Running @ " + STRING(TIME, "HH:MM:SS").    
+        OTHERWISE DO:
+            IF TIME - iCheckIn > 900 THEN ASSIGN c_to_addr = "progressgroup@lowen.com"
+                                                 c_subject = "MM-CheckIn"
+                                                 c_msg     = "Media Manager is still running as of " + STRING(TIME, "HH:MM:SS")
+                                                 iCheckIn  = TIME.
         END.
-    END.
+    END CASE.
+    
+    RUN mgemail.p ("Bullseye Database",c_to_addr,"","",c_subject,c_msg,"",FALSE).
+
 END PROCEDURE.
 
 

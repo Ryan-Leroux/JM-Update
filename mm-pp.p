@@ -3123,7 +3123,7 @@ PROCEDURE GetTemplate:
     DEFINE VARIABLE vTent1          AS LOG  NO-UNDO.
     DEFINE VARIABLE vTent2          AS LOG  NO-UNDO.
     DEFINE VARIABLE vTent3          AS LOG  NO-UNDO.
-    DEFINE VARIABLE vTent4         AS LOG  NO-UNDO.
+    DEFINE VARIABLE vTent4          AS LOG  NO-UNDO.
     DEFINE VARIABLE tmpseq1         AS INT  NO-UNDO.
     DEFINE VARIABLE tmpseq2         AS INT  NO-UNDO.
     DEFINE VARIABLE point1          AS INT  NO-UNDO.
@@ -4293,163 +4293,43 @@ END.
 
 
 PROCEDURE LogIt:
-    DEFINE INPUT PARAMETER pSource     AS INT  NO-UNDO.
-    DEFINE INPUT PARAMETER pMsg        AS CHAR NO-UNDO.
+/*------------------------------------------------------------------------------
+ Purpose: Log input message out to correct log file
+ 
+ INPUTS: pSource: Identifier used to determine which log file location       
+         pMsg:    Message that is needing logged
+ 
+ Notes:
+------------------------------------------------------------------------------*/
+    DEFINE INPUT PARAMETER pSource    AS INT  NO-UNDO.
+    DEFINE INPUT PARAMETER pMsg       AS CHAR NO-UNDO.
     
-    DEFINE VARIABLE fileOk             AS LOG  NO-UNDO.
-    DEFINE VARIABLE tmpUser            AS CHAR NO-UNDO.
+    DEFINE VARIABLE tmpUser           AS CHAR NO-UNDO.
+    DEFINE VARIABLE tmpFile           AS CHAR NO-UNDO.
 
     tmpUser = IF current-user-id <> "" THEN current-user-id ELSE OS-GETENV("computername"). 
     
     RUN GetDBase.
     
     CASE cSource:
-        WHEN 1 THEN DO:
-            RUN fileExists(cLogLoc,OUTPUT fileOk).
-            IF fileOk THEN
-                OUTPUT TO VALUE(cLogLoc + "\mediaManager.log") APPEND.
-            ELSE
-                OUTPUT TO VALUE(SESSION:TEMP-DIR + "mediaManager.log") APPEND.
-
-            IF cXML = "" THEN
-                PUT UNFORMATTED STRING(TODAY) " " STRING(TIME,"HH:MM:SS") " " cProcedure SKIP.
-            ELSE DO:
-                IF CAN-FIND(FIRST sign_mm_hdr NO-LOCK WHERE sign_mm_hdr.batchseq = int(cProcedure)) AND cResponse = "" THEN
-                    PUT UNFORMATTED STRING(TODAY) " " STRING(TIME,"HH:MM:SS") "  Started Batch: " cProcedure SKIP.
-                ELSE DO:
-                    PUT UNFORMATTED STRING(TODAY) " " cProcedure "  Start = " cstarttime "  Finish = " STRING(TIME,"HH:MM:SS") SKIP.
-                    PUT UNFORMATTED cXml SKIP.
-                    PUT UNFORMATTED cResponse SKIP.
-                END.
-            END.
-            OUTPUT CLOSE.
-        END.
-        WHEN 2 THEN DO:
-            RUN fileExists(cLogLoc,OUTPUT fileOk).
-            IF fileOk THEN
-                OUTPUT TO VALUE(cLogLoc + "\" + tmpUser  + "-mediaManagerTryCopy.log") APPEND.
-            ELSE
-                OUTPUT TO VALUE(SESSION:TEMP-DIR + "mediaManagerTryCopy.log") APPEND.
-
-            PUT UNFORMATTED STRING(TODAY) " " STRING(TIME,"HH:MM:SS") " " "Try find runseq = " cProcedure SKIP.
-            OUTPUT CLOSE.
-        END.
-        WHEN 3 THEN DO:
-            RUN fileExists(cLogLoc,OUTPUT fileOk).
-            IF fileOk THEN
-                OUTPUT TO VALUE(cLogLoc + "\" + tmpUser  + "-mediaManagerCopy.log") APPEND.
-            ELSE
-                OUTPUT TO VALUE(SESSION:TEMP-DIR + "mediaManagerCopy.log") APPEND.
-
-            PUT UNFORMATTED STRING(TODAY) " " STRING(TIME,"HH:MM:SS") " " cProcedure SKIP.
-            OUTPUT CLOSE.
-        END.
-        WHEN 4 THEN DO:
-            RUN fileExists(cLogLoc,OUTPUT fileOk).
-            IF fileOk THEN 
-                OUTPUT TO VALUE(cLogLoc + "\" + tmpUser  + "-MediaManagerSpeed.log") APPEND.
-            ELSE
-                OUTPUT TO VALUE(SESSION:TEMP-DIR + "MediaManagerSpeed.log") APPEND.
-
-            PUT UNFORMATTED STRING(TODAY) " " STRING(TIME,"HH:MM:SS") " " cProcedure SKIP.
-            OUTPUT CLOSE.
-        END.
-        WHEN 5 THEN DO:
-            RUN fileExists(cLogLoc,OUTPUT fileOk).
-            IF fileOk THEN 
-                OUTPUT TO VALUE(cLogLoc + "\" + tmpUser  + "-JtPrintLog2.log") APPEND.
-            ELSE
-                OUTPUT to VALUE(SESSION:TEMP-DIR + "JtPrintLog2.log") APPEND.
-
-            PUT UNFORMATTED STRING(TODAY) " " STRING(TIME,"HH:MM:SS") " " cProcedure SKIP.
-            OUTPUT CLOSE.
-        END.
-        WHEN 6 THEN DO:
-            RUN fileExists(cLogLoc,OUTPUT fileOk).
-            IF fileOk THEN 
-                OUTPUT TO VALUE(cLogLoc + "\" + tmpUser  + "-MediaManagerAnswers.log") APPEND.
-            ELSE
-                OUTPUT to VALUE(SESSION:TEMP-DIR + "MediaManagerAnswers.log") APPEND.
-
-            PUT UNFORMATTED STRING(TODAY) " " STRING(TIME,"HH:MM:SS") " " cProcedure SKIP.
-            OUTPUT CLOSE.
-        END.
-        WHEN 7 THEN DO:
-            OUTPUT to VALUE(cLogLoc + "\MediaManagerReprint.log") APPEND.
-            IF cXML = "" THEN
-                PUT UNFORMATTED STRING(TODAY) " " STRING(TIME,"HH:MM:SS") " " cProcedure SKIP.
-            ELSE DO:
-                PUT UNFORMATTED STRING(TODAY) " " cProcedure "  Start = " cstarttime "  Finish = " STRING(TIME,"HH:MM:SS") SKIP.
-                PUT UNFORMATTED cXml SKIP.
-                PUT UNFORMATTED cResponse SKIP.
-            END.
-            OUTPUT CLOSE.
-        END.
-        WHEN 8 THEN DO:
-            OUTPUT TO VALUE(cLogLoc + "\MmTrimDoupLog.log") APPEND.
-            PUT UNFORMATTED STRING(TODAY) " " STRING(TIME,"HH:MM:SS") " " cProcedure SKIP.
-            OUTPUT CLOSE.
-        END.
-        WHEN 9 THEN DO:
-            OUTPUT TO VALUE(cLogLoc + "\MediaManagerQueueOrder.log") APPEND.
-            PUT UNFORMATTED STRING(TODAY) " " STRING(TIME,"HH:MM:SS") " " cProcedure SKIP.
-            OUTPUT CLOSE.
-            
-        END.
-        WHEN 10 THEN DO:
-            RUN fileExists(cLogLoc,OUTPUT fileOk).
-            IF fileOk THEN
-                OUTPUT TO VALUE(cLogLoc + "\mm-preprocess.log") APPEND.
-            ELSE
-                OUTPUT TO VALUE(SESSION:TEMP-DIR + "mm-preprocess.log") APPEND.
-        
-            PUT UNFORMATTED STRING(TODAY) " " STRING(TIME,"HH:MM:SS") " " cProcedure SKIP.
-            OUTPUT CLOSE.
-        END.
-        WHEN 11 THEN DO:
-             OUTPUT TO VALUE(cLogLoc + "\MediaManagerMultiBatch.log") APPEND.
-             PUT UNFORMATTED STRING(TODAY) " " STRING(TIME,"HH:MM:SS") " " cProcedure SKIP.
-             OUTPUT CLOSE.
-        END.
-        WHEN 12 THEN DO:
-            OUTPUT TO VALUE(cLogLoc + "\MMDynam.log") APPEND.
-            PUT UNFORMATTED STRING(TODAY) " " STRING(TIME,"HH:MM:SS") " " cProcedure SKIP.
-            OUTPUT CLOSE.    
-        END.
-        WHEN 13 THEN DO:
-            OUTPUT TO VALUE(cLogLoc + "\MMCheckImg.log") APPEND.
-            PUT UNFORMATTED STRING(TODAY) " " STRING(TIME,"HH:MM:SS") " " cProcedure SKIP.
-            OUTPUT CLOSE.
-        END.
-        WHEN 14 THEN DO:
-            OUTPUT TO VALUE(cLogLoc + "\MMCropPartials.log") APPEND.
-            PUT UNFORMATTED STRING(TODAY) " " STRING(TIME,"HH:MM:SS") " " cProcedure SKIP.
-            OUTPUT CLOSE.
-        END.
-        WHEN 99 THEN DO: /*added this to log full start to finish*/
-            OUTPUT TO VALUE(cLogLoc + "\MM-Ryan-Full.log") APPEND.
-            PUT UNFORMATTED STRING(TODAY) " " STRING(TIME,"HH:MM:SS") " " cProcedure SKIP.
-            OUTPUT CLOSE.    
-        END.
-        WHEN 999 THEN DO:
-            OUTPUT TO VALUE(cLogLoc + "\BatchSpeed.log") APPEND.
-            PUT UNFORMATTED STRING(TODAY) " " STRING(TIME,"HH:MM:SS") " " cProcedure SKIP.
-            OUTPUT CLOSE.
-        END. 
-        WHEN 100 THEN DO:
-            OUTPUT TO VALUE(cLogLoc + "\CorexOnly.log") APPEND.
-            PUT UNFORMATTED STRING(TODAY) " " STRING(TIME,"HH:MM:SS") " " cProcedure SKIP.
-            OUTPUT CLOSE.
-        END.
-        WHEN 101 THEN DO:
-            OUTPUT TO VALUE(cLogLoc + "\PC.log") APPEND.
-            PUT UNFORMATTED STRING(TODAY) " " STRING(TIME,"HH:MM:SS") " " cProcedure SKIP.
-            OUTPUT CLOSE.
-        END.
-   END CASE.
+        WHEN 1 THEN tmpFile = "\jmMM-"      + cDBase + "-". /* mm.p log */
+        WHEN 2 THEN tmpFile = "\jmSpeed-"   + cDBase + "-". /* Procedure speeds log */
+        WHEN 3 THEN tmpFile = "\jmReprint-" + cDBase + "-". /* mmReprint.w log */
+        WHEN 4 THEN tmpFile = "\jmDynam-"   + cDBase + "-". /* Dynamic Nest Batching log */
+        WHEN 5 THEN tmpFile = "\jmDetails-" + cDBase + "-". /* Procedure Details log */
+        WHEN 6 THEN tmpFile = "\CorexOnly-" + cDBase + "-". /* Prime Center log */
+    END CASE.
     
-    OUTPUT TO VALUE(cLogLoc + "\MediaManagerDetail.log") APPEND.
-    PUT UNFORMATTED STRING(TODAY) " " STRING(TIME,"HH:MM:SS") " " cProcedure SKIP.
+    IF curFile <> "" THEN DO:
+        OUTPUT TO VALUE(jmLogs + tmpFile + STRING(MONTH(TODAY)) + "-" + STRING(YEAR(TODAY)) + ".log") APPEND.
+        PUT UNFORMATTED STRING(TODAY) " " STRING(TIME,"HH:MM:SS") " " pMsg SKIP.
+        OUTPUT CLOSE.
+    END.
+    
+    
+    /* This logs everything */
+    OUTPUT TO VALUE(cLogLoc + "\jmFull.log") APPEND.
+    PUT UNFORMATTED STRING(TODAY) " " STRING(TIME,"HH:MM:SS") " " pMsg SKIP.
     OUTPUT CLOSE.
     
 

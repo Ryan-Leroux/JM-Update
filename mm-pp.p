@@ -1873,7 +1873,6 @@ PROCEDURE Email:
     END.
     
     {mgemaildist.i "JobManagerReport"}
-/*     c_to_addr = "terryp@lowen.com". */
 
     DO: /*mail the slimmed down report to everyone*/
         ASSIGN c_subject     = "Job Manager Status Report"
@@ -1886,7 +1885,7 @@ PROCEDURE Email:
     
     DO: /*mail the full version to select few*/
         ASSIGN c_subject     = "Job Manager Status Report"
-               c_to_addr     = cProgrammerList + ";brittanyb@lowen.com;matthews@lowen.com"
+               c_to_addr     = cProgrammerList + ";brittanyb@lowen.com"
                c_msg         = "Attached spreadsheet of the Job Manager report(full version)." + CHR(10)
                                + CHR(10)
                                + "Regen Date/Time: " + STRING(TODAY) + " at " + STRING(TIME,"HH:MM")
@@ -2286,7 +2285,7 @@ PROCEDURE GangCheck:
     OUTPUT CLOSE.
 
     IF sendEmail THEN DO:
-        c_to_addr = cProgrammerList + ";brittanyb@lowen.com;matthews@lowen.com".
+        c_to_addr = cProgrammerList + ";brittanyb@lowen.com".
         ASSIGN c_subject     = "GangCheck"
                c_msg         = "Attached is a text file that shows possible duplicate runs and any instances of gangs larger than the order quantity".
                c_attachments = gangFile. 
@@ -4311,7 +4310,7 @@ PROCEDURE LogIt:
     
     RUN GetDBase.
     
-    CASE cSource:
+    CASE pSource:
         WHEN 1 THEN tmpFile = "\jmMM-"      + cDBase + "-". /* mm.p log */
         WHEN 2 THEN tmpFile = "\jmSpeed-"   + cDBase + "-". /* Procedure speeds log */
         WHEN 3 THEN tmpFile = "\jmReprint-" + cDBase + "-". /* mmReprint.w log */
@@ -4320,8 +4319,8 @@ PROCEDURE LogIt:
         WHEN 6 THEN tmpFile = "\CorexOnly-" + cDBase + "-". /* Prime Center log */
     END CASE.
     
-    IF curFile <> "" THEN DO:
-        OUTPUT TO VALUE(jmLogs + tmpFile + STRING(MONTH(TODAY)) + "-" + STRING(YEAR(TODAY)) + ".log") APPEND.
+    IF tmpFile <> "" THEN DO:
+        OUTPUT TO VALUE(cLogLoc + tmpFile + STRING(MONTH(TODAY)) + "-" + STRING(YEAR(TODAY)) + ".log") APPEND.
         PUT UNFORMATTED STRING(TODAY) " " STRING(TIME,"HH:MM:SS") " " pMsg SKIP.
         OUTPUT CLOSE.
     END.
@@ -5952,7 +5951,7 @@ PROCEDURE ZundRotate:
 
     RUN clientapp(xmlData,OUTPUT cResponse).
     IF INDEX(cResponse,"Success") = 0 THEN DO: 
-        ASSIGN c_to_addr = cProgrammerList.
+        ASSIGN c_to_addr = cProgrammerList
                c_subject = "Zund Rotate Failed"
                c_msg     = cResponse + CHR(10) + CHR(10) + "File= " + cInputFile.
                

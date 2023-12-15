@@ -2,16 +2,11 @@ ROUTINE-LEVEL ON ERROR UNDO, THROW.
  DEFINE INPUT  PARAMETER purge      AS LOGICAL NO-UNDO.
  DEFINE INPUT  PARAMETER blankSlate AS LOGICAL NO-UNDO.
 
-/* DEFINE VARIABLE purge       AS LOG  NO-UNDO INITIAL YES.*/
-/* DEFINE VARIABLE blankSlate  AS LOG  NO-UNDO INITIAL YES.*/
-
 DEFINE VARIABLE canRun       AS LOG    NO-UNDO.
 DEFINE VARIABLE a_ok         AS LOG    NO-UNDO.
 DEFINE VARIABLE mm-pp-handle AS HANDLE NO-UNDO.
-DEFINE VARIABLE dBase        AS CHAR   NO-UNDO.
 DEFINE VARIABLE workDate     AS DATE   NO-UNDO.
 DEFINE VARIABLE mtlLoc       AS CHAR   NO-UNDO.
-
 DEFINE VARIABLE CorexCnt     AS INT    NO-UNDO.
 DEFINE VARIABLE CorexSheets  AS INT    NO-UNDO.
 DEFINE VARIABLE PrimeCnt     AS INT    NO-UNDO.
@@ -27,14 +22,12 @@ DEFINE VARIABLE nWorkDays AS INTEGER NO-UNDO.
 SESSION:SUPPRESS-WARNINGS = YES.
 RUN mm-pp.p PERSISTENT SET mm-pp-handle. 
 
-RUN getDBase     IN mm-pp-handle (OUTPUT dBase).
 
 /******************* Main **********************/
 RUN CanIRun         IN mm-pp-handle ("Start", OUTPUT canRun).
-IF NOT canRun THEN DO:
-    RUN logs        IN mm-pp-handle (1,"MM-CanIRun-NO","","","").
-/*     RETURN. */
-END.
+IF NOT canRun THEN  RUN logs        IN mm-pp-handle (1,"MM-CanIRun-NO","","","").
+
+
  IF canRun THEN DO:
     
     RUN checkIn     ("Start"). 
@@ -92,10 +85,9 @@ END.
     RUN printorder   IN mm-pp-handle ("").
     RUN logs         IN mm-pp-handle (1,"MM-PrintOrder Finished","","","").    
 
-    IF dBase = "Live" THEN DO:
-        RUN checkTemplates  IN mm-pp-handle.
-        RUN logs            IN mm-pp-handle (1,"MM-CheckTemplates Finished","","","").
-    END.
+    /* CheckTemplates was only running on LIVE, check why */
+    RUN checkTemplates  IN mm-pp-handle.
+    RUN logs            IN mm-pp-handle (1,"MM-CheckTemplates Finished","","","").
     
     RUN genXml       IN mm-pp-handle ("").
     RUN logs         IN mm-pp-handle (1,"MM-GenXML Finished","","","").   

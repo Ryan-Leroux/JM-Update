@@ -243,7 +243,6 @@ PROCEDURE BuildTT:
             END.
             RUN FindMatPanel.p (squ_ptdet.subseq,OUTPUT matRecid).
             FIND squ_mat NO-LOCK WHERE RECID(squ_mat) = matRecid NO-ERROR. 
-/*             IF AVAIL(squ_mat) THEN RUN checkForBleed(squ_mat.subseq,output hasBleed). */
 
             IF NOT AVAIL squ_mat AND AVAIL squ_plan THEN DO:
                 RUN findIcNo(so_items.itemseq,so_items.so_no,so_items.ITEM_No,STRING(squ_plan.ic_no),so_items.part_no,"no",OUTPUT cICseq).
@@ -251,7 +250,6 @@ PROCEDURE BuildTT:
                 IF AVAIL b_ptdet THEN DO:
                     RUN FindMatPanel.p (b_ptdet.subseq,OUTPUT matRecid).
                     FIND FIRST squ_mat NO-LOCK WHERE RECID(squ_mat) = matRecid NO-ERROR. 
-/*                     IF AVAIL(squ_mat) THEN RUN checkForBleed(squ_mat.subseq,output hasBleed). */
                 END.
                 IF NOT AVAIL squ_mat THEN DO:
                     RUN findIcNo(so_items.itemseq,so_items.so_no,so_items.ITEM_No,STRING(squ_plan.ic_no),so_items.part_no,"YES",OUTPUT cICseq).
@@ -259,7 +257,6 @@ PROCEDURE BuildTT:
                     IF AVAIL b_ptdet THEN DO:
                         RUN FindMatPanel.p (b_ptdet.subseq,OUTPUT matRecid).
                         FIND FIRST squ_mat NO-LOCK WHERE RECID(squ_mat) = matRecid NO-ERROR. 
-/*                         IF AVAIL(squ_mat) THEN RUN checkForBleed(squ_mat.subseq,output hasBleed). */
                     END.
                 END.
                 IF NOT AVAIL squ_mat THEN DO:
@@ -268,7 +265,6 @@ PROCEDURE BuildTT:
                     IF AVAIL b_ptdet THEN DO:
                         RUN FindMatPanel.p (b_ptdet.subseq,OUTPUT matRecid).
                         FIND FIRST squ_mat NO-LOCK WHERE RECID(squ_mat) = matRecid NO-ERROR. 
-/*                         IF AVAIL(squ_mat) THEN RUN checkForBleed(squ_mat.subseq,output hasBleed). */
                     END.
                 END.
             END.
@@ -418,20 +414,13 @@ PROCEDURE BuildTT:
 
             /*get qty of need panels*/
             RUN getQty(so_items.itemseq,OUTPUT qtyRan, OUTPUT qtyNeeded, OUTPUT inQueue). 
-
-            RUN checkForBleed(squ_ptdet.subseq,OUTPUT hasBleed).
-            /*set everything to 'no' so it all will gang together through prepcenter except alumalite,
-              we want alumalite to be separated out (bleed vs no bleed) so let the hasbleed logic separate them*/
-            IF hasBleed AND ctype <> "Alumalite" THEN
-                hasBleed = NO.
             
             hotfolderin = IF NOT squ_ptdet.pt_hotfolderseq <= 0 THEN squ_ptdet.pt_hotfolderseq ELSE pt_det.pt_hotfolderseq.
             RUN custhotfolder.p(so_items.itemseq,hotfolderin, OUTPUT hotfolderout).
 
             CREATE ttArt.
             ASSIGN ttArt.ttTempSeq   = cTemplate
-                   ttArt.ttPointSeq  = cPointer
-                   ttArt.ttSize      = STRING(pt_det.pressprintingheight) + "x" + string(pt_det.pressprintingwidth)
+                   ttArt.ttSize      = STRING(pt_det.pressprintingheight) + "x" + STRING(pt_det.pressprintingwidth)
                    ttArt.ttPart      = so_items.part_no
                    ttArt.ttDue       = so_file.ship_by
                    ttArt.ttCustNo    = so_file.cust_no
@@ -446,7 +435,7 @@ PROCEDURE BuildTT:
                    ttArt.ttSteelTent = (IF (squ_ptdet.steeltent OR squ_ptdet.jackunit) THEN YES ELSE NO) /* iLoop = 2 THEN TRUE ELSE FALSE*/
                    ttArt.ttType      = IF isReflect THEN cMaterial + " Reflective" ELSE cMaterial
                    ttArt.ttExploded  = NO
-                   ttArt.ttCustNo    = IF cTemplate = 0 THEN YES ELSE NO
+                   ttArt.ttDynamNest = IF cTemplate = 0 THEN YES ELSE NO
                    ttArt.ttHorzFlute = squ_ptdet.horz_flutes
                    ttArt.ttVertFlute = squ_ptdet.VERT_flutes
                    .
@@ -458,6 +447,7 @@ PROCEDURE BuildTT:
         ELSE RUN ReportIssues(so_items.itemseq,"MM-Planning",so_items.so_no,STRING(so_items.ITEM_no),"","Unable to find panel","","","","").
     END.
 END PROCEDURE.
+
 
 PROCEDURE CanIRun:
     DEFINE INPUT  PARAMETER toDo AS CHAR NO-UNDO.
@@ -494,27 +484,12 @@ PROCEDURE CanIRun:
     
 END PROCEDURE.
 
-PROCEDURE checkForBleed:
-    DEFINE INPUT  PARAMETER pSubseq   AS INT NO-UNDO.
-    DEFINE OUTPUT PARAMETER pHasBleed AS LOG NO-UNDO.
-    DEFINE VARIABLE actFound AS LOG NO-UNDO.
 
-    FOR EACH squ_act NO-LOCK WHERE squ_act.subseq = pSubseq BY squ_act.order:
-        IF squ_act.actseq = 42 THEN actFound = YES.
-        IF squ_act.actseq = 8  THEN DO: 
-            pHasBleed = IF actFound THEN YES ELSE NO. 
-            LEAVE.
-        END.
-    END.
-
-END PROCEDURE.
-
-PROCEDURE checkImages:
+PROCEDURE CheckImages:
     /*checks and assign image file locations*/
     DEFINE INPUT PARAMETER cItemseq  AS CHAR NO-UNDO.
     DEFINE VARIABLE cImage     AS CHAR NO-UNDO.
     DEFINE VARIABLE cProg      AS INT  NO-UNDO.
-    DEFINE VARIABLE ctime      AS INT  NO-UNDO.
     DEFINE VARIABLE imagecnt   AS INT  NO-UNDO.
     DEFINE VARIABLE lastImage  AS INT  NO-UNDO.
     DEFINE VARIABLE imageSide  AS CHAR NO-UNDO.
@@ -966,7 +941,8 @@ PROCEDURE checkImages:
 
 END PROCEDURE.
 
-PROCEDURE checkMaterial:
+
+PROCEDURE CheckMaterial:
     DEFINE INPUT  PARAMETER cSeq AS INT  NO-UNDO.
     DEFINE OUTPUT PARAMETER c_ok AS LOG  NO-UNDO INITIAL NO.
     DEFINE VARIABLE iQty          AS INT  NO-UNDO INITIAL 0.
@@ -986,7 +962,8 @@ PROCEDURE checkMaterial:
 
 END PROCEDURE.
 
-PROCEDURE checks:
+
+PROCEDURE Checks:
     DEFINE INPUT PARAMETER cSo   AS CHAR NO-UNDO.
     DEFINE INPUT PARAMETER cItem AS INT  NO-UNDO.
     DEFINE OUTPUT PARAMETER c_ok AS LOG  NO-UNDO INITIAL NO.
@@ -1111,6 +1088,7 @@ PROCEDURE checks:
 
 END PROCEDURE.
 
+
 PROCEDURE CheckDynamicNestCompatability:
     DEFINE INPUT  PARAMETER inventoryPart     AS CHARACTER NO-UNDO.
     DEFINE INPUT  PARAMETER substrateType     AS CHARACTER NO-UNDO.
@@ -1129,7 +1107,8 @@ PROCEDURE CheckDynamicNestCompatability:
     
 END PROCEDURE.
 
-PROCEDURE checkTemplates:
+
+PROCEDURE CheckTemplates:
     DEFINE VARIABLE tmpcmd          AS CHAR         NO-UNDO.
     DEFINE VARIABLE tempSum         AS DEC          NO-UNDO.
     DEFINE VARIABLE xmldata         AS CHAR         NO-UNDO.
@@ -1167,7 +1146,8 @@ PROCEDURE checkTemplates:
     END.
 END PROCEDURE.
 
-PROCEDURE clientapp:
+
+PROCEDURE ClientApp:
     DEFINE INPUT PARAMETER xmldata    AS CHAR NO-UNDO.
     DEFINE OUTPUT PARAMETER cResponse AS CHAR NO-UNDO.
     DEFINE VARIABLE chDart          AS COM-HANDLE   NO-UNDO.
@@ -1180,6 +1160,7 @@ PROCEDURE clientapp:
     RELEASE OBJECT chDart NO-ERROR.
     ASSIGN chDart = ?.
 END PROCEDURE.
+
 
 PROCEDURE CompleteReprint:
     DEFINE INPUT PARAMETER pBatchseq AS INTEGER NO-UNDO.
@@ -1210,7 +1191,8 @@ PROCEDURE CompleteReprint:
     
 END PROCEDURE.
 
-PROCEDURE corexHW:
+
+PROCEDURE CorexHW:
     DEFINE INPUT  PARAMETER pHeight   AS DEC NO-UNDO.
     DEFINE INPUT  PARAMETER pWidth    AS DEC NO-UNDO.
     DEFINE INPUT  PARAMETER pPH       AS DEC NO-UNDO.
@@ -1224,6 +1206,7 @@ PROCEDURE corexHW:
     IF pPH = pWidth AND pPW = pHeight THEN pSwitched = TRUE.
     
 END PROCEDURE.
+
 
 PROCEDURE CreateAndSetReprintData:
 DEFINE VARIABLE NewReprintSeq AS INTEGER NO-UNDO.
@@ -1250,6 +1233,7 @@ DEFINE VARIABLE NewReprintSeq AS INTEGER NO-UNDO.
     IF AVAILABLE sign_mm_reprint THEN RELEASE sign_mm_reprint.
 
 END PROCEDURE.
+
 
 PROCEDURE DynamicNest:
     DEFINE INPUT PARAMETER cItemseq AS CHARACTER NO-UNDO.
@@ -1280,7 +1264,7 @@ PROCEDURE DynamicNest:
     
 
      /*first make sure you have all the info you need...occurs in savedown saves sizes to squ_ptdet*/
-    FOR EACH nestArt WHERE nestArt.ttCustNo = YES BREAK BY nestArt.ttType BY nestArt.ttSides:
+    FOR EACH nestArt WHERE nestArt.ttDynamNest = YES BREAK BY nestArt.ttType BY nestArt.ttSides:
         IF nestArt.ttType = ? THEN NEXT.
 
         FIND tParams NO-LOCK WHERE tParams.substrate = nestArt.ttType NO-ERROR.
@@ -1297,7 +1281,7 @@ PROCEDURE DynamicNest:
     /*****Zund Replacement******/
     /***************************/ 
     EMPTY TEMP-TABLE tNest.
-    FOR EACH ttart WHERE ttArt.ttCustNo = YES BREAK BY ttArt.ttType  BY ttArt.ttInvPart BY ttArt.ttSides :
+    FOR EACH ttart WHERE ttArt.ttDynamNest = YES BREAK BY ttArt.ttType  BY ttArt.ttInvPart BY ttArt.ttSides :
         RUN logs(101,"DynamicNest - ttArt.ttType:" + ttArt.ttType + " Seq:" + STRING(ttArt.ttTempSeq) + " SO:" + STRING(ttArt.ttSO) + "-" + STRING(ttArt.ttItemNo),"","","").
         IF INDEX(ttArt.ttType,"Corex") > 0 AND ttArt.ttTempSeq <> 28 AND ttArt.ttTempSeq <> 29 THEN NEXT. /*Ryanle - added Corex filter for Prime Center Project*/
         IF ttArt.ttType = ? THEN NEXT.
@@ -1677,6 +1661,7 @@ PROCEDURE DynamicNest:
     RELEASE squ_ptdet.
 END PROCEDURE.
 
+
 PROCEDURE Email:
     DEFINE VARIABLE xMsg            AS CHAR   NO-UNDO.
     DEFINE VARIABLE eCnt            AS INT    NO-UNDO.
@@ -1976,7 +1961,8 @@ PROCEDURE Email:
     END.
 END PROCEDURE.
 
-PROCEDURE excelFormat:
+
+PROCEDURE ExcelFormat:
     DEFINE INPUT PARAMETER nRow AS INT NO-UNDO.
     DEFINE INPUT-OUTPUT PARAMETER sFile  AS CHAR NO-UNDO.
 
@@ -2015,7 +2001,8 @@ PROCEDURE excelFormat:
 
     chWorkSheet:Range("A3:J3"):SELECT().
     chExcelApplication:Selection:AutoFilter(?,?,?).
-    NO-RETURN-VALUE chWorkSheet:Range("A3", chWorksheet:Range("J3"):END(-4121)):SORT(chWorksheet:Range("C3"), 1, chWorksheet:Range("A3"), , , chWorksheet:Range("B3"), , 1, , , , , , , ).
+    
+    /*chWorkSheet:Range("A3", chWorksheet:Range("J3"):END(-4121)):SORT(chWorksheet:Range("C3"), 1, chWorksheet:Range("A3"), , , chWorksheet:Range("B3"), , 1, , , , , , , ).*/
 
     sFile = REPLACE(sFile,".csv",".xls").
     {excel-save.i sFile}
@@ -2029,7 +2016,8 @@ PROCEDURE excelFormat:
 
 END PROCEDURE.
 
-PROCEDURE exportData:
+
+PROCEDURE ExportData:
     DEFINE INPUT PARAMETER cType AS CHAR NO-UNDO.
     DEFINE VARIABLE dataFile AS CHAR NO-UNDO.
 
@@ -2057,7 +2045,8 @@ PROCEDURE exportData:
     END.
 END PROCEDURE.
 
-PROCEDURE exportPDF:
+
+PROCEDURE ExportPDF:
     DEFINE INPUT PARAMETER eArtfile AS CHAR NO-UNDO.
     DEFINE VARIABLE eFolder AS CHAR NO-UNDO.
     
@@ -2071,7 +2060,8 @@ PROCEDURE exportPDF:
 
 END PROCEDURE.
 
-PROCEDURE fileExists:
+
+PROCEDURE FileExists:
     DEFINE INPUT  PARAMETER iFile      AS CHAR NO-UNDO.
     DEFINE OUTPUT PARAMETER fileExists AS LOG  NO-UNDO.
 
@@ -2079,7 +2069,8 @@ PROCEDURE fileExists:
     IF FILE-INFO:FULL-PATHNAME <> ? THEN fileExists = YES. ELSE fileExists = NO.
 END PROCEDURE.
 
-PROCEDURE findIcNo:
+
+PROCEDURE FindIcNo:
     DEFINE INPUT PARAMETER cItemSeq AS INT  NO-UNDO.
     DEFINE INPUT PARAMETER cSo      AS CHAR NO-UNDO.
     DEFINE INPUT PARAMETER cItemNo  AS INT  NO-UNDO.
@@ -2211,6 +2202,7 @@ PROCEDURE findIcNo:
     END.
 END PROCEDURE.
 
+
 PROCEDURE FindSpace:
     DEFINE INPUT  PARAMETER cBed   AS INT NO-UNDO.
     DEFINE OUTPUT PARAMETER cSpace AS DEC NO-UNDO.
@@ -2271,7 +2263,7 @@ PROCEDURE FindSpace:
 END PROCEDURE.
 
 
-PROCEDURE gangCheck:
+PROCEDURE GangCheck:
     DEFINE BUFFER buf_mm_det FOR sign_mm_det.
     DEFINE BUFFER buf_mm_hdr FOR sign_mm_hdr.
     
@@ -2366,6 +2358,7 @@ PROCEDURE gangCheck:
         RUN mgemail.p ("Bullseye Database",c_to_addr,"","",c_subject,c_msg,c_attachments,FALSE).
     END.
 END PROCEDURE.
+
 
 PROCEDURE GenXML:
     DEFINE INPUT PARAMETER cBatch AS CHAR       NO-UNDO.
@@ -2463,7 +2456,7 @@ PROCEDURE GenXML:
               IF INDEX(sign_mm_hdr.matltype,"Magnetic")  > 0 THEN NEXT.
 
               FIND signbed NO-LOCK WHERE signbed.seq = sign_mm_hdr.bedseq NO-ERROR.
-              cTime  = TIME.
+              iTime  = TIME.
               HdrNum = sign_mm_hdr.batchseq.
 
               tmpWidth = 0. tmpHeight = 0.
@@ -2482,7 +2475,7 @@ PROCEDURE GenXML:
 
               IF outputfile = "Error" THEN DO:
                   RUN logs(99,"GenXML 3 outputfile error -batchno " + string(sign_mm_hdr.batchseq),"","","").
-                  errorCnt = errorCnt + 1.
+                  iErrorCnt = iErrorCnt + 1.
                   RUN trimbeds(STRING(sign_mm_hdr.batchseq)).
                   NEXT.
                   /*outputfile = "\\fs02\bullseye\images\agentphotos\Temporary\mtl1\Aluminum Ref 063\POP 55".*/
@@ -2737,7 +2730,7 @@ PROCEDURE GenXML:
                   ASSIGN xmlData = "<Host>Art-JM1</Host>" + "<XMLData>" + "<callingProgram>" + "MM.P" + "</callingProgram>" + "<Program>" + "Sart" + "</Program>" + "<XML>" + xmlData + "</XML>" + "</XMLData>".
                   
                   ASSIGN svxmlData = xmldata
-                            runCnt = runCnt + 1.
+                           iRunCnt = iRunCnt + 1.
                          
                   RUN logs(99,"GenXML - xmlData: " + xmlData,"","","").
                   
@@ -2888,7 +2881,7 @@ PROCEDURE GenXML:
                                              AND (IF tempHdr.BatchNested THEN TRUE ELSE tParams.template = tempHdr.DynamicTemplate)  NO-ERROR.
                 IF NOT AVAILABLE(tParams) THEN NEXT.
                 
-                cTime  = TIME.
+                iTime  = TIME.
                 HdrNum = tempHdr.batchseq.
 
                 tmpWidth = 0. tmpHeight = 0.
@@ -2906,7 +2899,7 @@ PROCEDURE GenXML:
                 cHotfolderseq = 0.
                 RUN getHotfolder(tempHdr.batchseq,tempHdr.matlType,INPUT-OUTPUT cHotfolderseq,OUTPUT outputfile).
                 IF outputfile = "Error" THEN DO:
-                    errorCnt = errorCnt + 1.
+                    iErrorCnt = iErrorCnt + 1.
                     RUN trimbeds(STRING(tempHdr.batchseq)).
                     NEXT.
                 END.
@@ -3108,10 +3101,9 @@ PROCEDURE GenXML:
                     ASSIGN xmldata = xmldata + "</images>".
                     ASSIGN xmlData = xmlData + "</bed>".
                     ASSIGN xmlData = "<Host>Art-JM1</Host>" + "<XMLData>" + "<callingProgram>" + "MM.P" + "</callingProgram>" + "<Program>" + "Sart" + "</Program>" + "<XML>" + xmlData + "</XML>" + "</XMLData>"
-                           svxmlData = xmldata
-                           runCnt = runCnt + 1.
+                         svxmlData = xmldata
+                           iRunCnt = iRunCnt + 1.
                     RUN logs(99,"GenXML DNest End - batch:" + string(temphdr.batchseq) + " xmlData: " + xmlData  ,"","","").
-                    /*RUN clientapp(xmlData,OUTPUT cResponse).*/
                     
                     /*New XML Logic - 7/28/22 - RyanLe*/                                      
                     COPY-LOB xmlData TO FILE "\\fs02\bullseye\JM\LIVE\XML\" + STRING(MTIME) + "_" + STRING(temphdr.batchseq) + "-" + STRING(iLoop) + ".xml".
@@ -3126,7 +3118,8 @@ PROCEDURE GenXML:
     iProgFinish = TIME.
 END PROCEDURE.
 
-PROCEDURE GET_mach_time:
+
+PROCEDURE GET_Mach_Time:
     DEFINE INPUT  PARAMETER bSeq      AS INT NO-UNDO.
     DEFINE INPUT  PARAMETER sbSeq     AS INT NO-UNDO.
     DEFINE OUTPUT PARAMETER oMachMins AS DEC NO-UNDO.
@@ -3163,8 +3156,7 @@ PROCEDURE GET_mach_time:
 END PROCEDURE.
 
 
-
-PROCEDURE getHotfolder:
+PROCEDURE GetHotFolder:
     DEFINE INPUT        PARAMETER cBatch          AS INTEGER   NO-UNDO.
     DEFINE INPUT        PARAMETER cMaterial       AS CHARACTER NO-UNDO.
     DEFINE INPUT-OUTPUT PARAMETER cHotFolderSeq   AS INTEGER   NO-UNDO.
@@ -3271,22 +3263,25 @@ PROCEDURE getHotfolder:
     IF AVAILABLE pt_hotfolder THEN RELEASE pt_hotfolder.
 END PROCEDURE.
 
-PROCEDURE getDBase:
-    DEFINE OUTPUT PARAMETER oDBase AS CHAR NO-UNDO.
-    /*check which database - is it being ran in live?*/
 
-    par = DBPARAM(1).
-    IF CAN-DO(par, "-S 2007") THEN oDBase = "Test".
-    IF CAN-DO(par, "-S 2001") THEN oDBase = "Live".
-    IF CAN-DO(par, "-S 2022") THEN oDBase = "QA".
-    IF CAN-DO(par, "-S 2050") THEN oDBase = "Yesterday".
+PROCEDURE GetDBase:
+    DEFINE OUTPUT PARAMETER oDBase AS CHAR NO-UNDO.
+    
+    DEFINE VARIABLE cDBParams AS CHAR NO-UNDO.
+
+    cDBParams = DBPARAM(1).
+    IF CAN-DO(cDBParams, "-S 2007") THEN oDBase = "Test".
+    IF CAN-DO(cDBParams, "-S 2001") THEN oDBase = "Live".
+    IF CAN-DO(cDBParams, "-S 2022") THEN oDBase = "QA".
+    IF CAN-DO(cDBParams, "-S 2050") THEN oDBase = "Yesterday".
     IF OS-GETENV("computername") = "qbprod" OR OS-GETENV("computername") = "qbtest" THEN oDBase = "Live".
     
     cDBase = oDBase.
 
 END PROCEDURE.
 
-PROCEDURE getTemplate:
+
+PROCEDURE GetTemplate:
     DEFINE INPUT  PARAMETER vType   AS CHAR NO-UNDO.
     DEFINE INPUT  PARAMETER vPart   AS CHAR NO-UNDO.
     DEFINE INPUT  PARAMETER vHeight AS DEC  NO-UNDO.
@@ -3485,7 +3480,8 @@ PROCEDURE getTemplate:
        
 END PROCEDURE.
 
-PROCEDURE getQty:
+
+PROCEDURE GetQty:
     DEFINE INPUT  PARAMETER pSeq    AS INT NO-UNDO.
     DEFINE OUTPUT PARAMETER pRan    AS INT NO-UNDO.
     DEFINE OUTPUT PARAMETER pNeed   AS INT NO-UNDO.
@@ -3564,6 +3560,7 @@ PROCEDURE GetReprintQty:
     END.
 END PROCEDURE.
 
+
 PROCEDURE Grouping:
     DEFINE INPUT PARAMETER cItemSeq AS CHAR NO-UNDO.
 
@@ -3574,15 +3571,13 @@ PROCEDURE Grouping:
     DEFINE VARIABLE numLeft         AS INT  NO-UNDO.
     DEFINE VARIABLE tmpIseq         AS INT  NO-UNDO.
     DEFINE VARIABLE tmpLog          AS LOG  NO-UNDO.
-/*     OUTPUT TO "f:\tmp\ttartbs.csv". */
-/*     FOR EACH ttart:                 */
-/*         EXPORT DELIMITER "," ttart. */
-/*     END.                            */
-/*     OUTPUT CLOSE.                   */
 
     
     FOR EACH signbed NO-LOCK:
-        FOR EACH ttArt WHERE ttart.ttTempSeq = signbed.Seq AND ttArt.ttCustNo = NO BY ttArt.ttType BY ttArt.ttinvpart BY ttart.ttsides BY ttart.tthotfolder BY ttart.ttso BY ttart.ttItemno BY ttart.ttCustNo:
+        FOR EACH ttArt WHERE ttArt.ttTempSeq   = signbed.Seq 
+                         AND ttArt.ttDynamNest = FALSE 
+                          BY ttArt.ttType BY ttArt.ttInvPart BY ttArt.ttSides BY ttart.ttHotFolder BY ttArt.ttSo BY ttArt.ttItemNo BY ttArt.ttCustNo:
+                             
             RUN logs(101,"Grouping - ttArt Type:" + ttArt.ttType + " Seq:" + STRING(ttArt.ttTempSeq) + " Size:" + STRING(ttArt.ttSize) + " SO:" + STRING(ttArt.ttso) + "-" + STRING(ttArt.ttItemNo),"","","").
             IF ttart.ttqty < 1 THEN NEXT.
             IF tmpInt <> ttart.ttItemseq THEN DO:
@@ -3610,7 +3605,6 @@ PROCEDURE Grouping:
                        sign_mm_hdr.matlType         = ttArt.ttType
                        sign_mm_hdr.sides            = ttArt.ttSides
                        sign_mm_hdr.bedseq           = ttArt.ttTempSeq
-                       sign_mm_hdr.PointerSeq       = ttArt.ttPointSeq
                        sign_mm_hdr.inv_part         = ttArt.ttInvpart
                        sign_mm_hdr.qty              = 1
                        sign_mm_hdr.rerun            = IF cItemseq <> "" THEN YES ELSE NO
@@ -3707,7 +3701,6 @@ PROCEDURE Grouping:
                                        sign_mm_hdr.matlType         = ttArt.ttType
                                        sign_mm_hdr.sides            = ttArt.ttSides
                                        sign_mm_hdr.bedseq           = ttArt.ttTempSeq
-                                       sign_mm_hdr.PointerSeq       = ttArt.ttPointSeq
                                        sign_mm_hdr.inv_part         = ttArt.ttInvPart
                                        sign_mm_hdr.qty              = 1
                                        sign_mm_hdr.rerun            = IF cItemseq <> "" THEN YES ELSE NO
@@ -4165,31 +4158,6 @@ PROCEDURE GroupingCorex:
 END PROCEDURE.
 
 
-PROCEDURE CorexQty:
-    DEFINE INPUT PARAMETER iItemSeq AS INT  NO-UNDO.
-    DEFINE VARIABLE        cFileLoc AS CHAR NO-UNDO.
-    
-    /*FOR EACH sign_mm_det WHERE sign_mm_det.itemseq = iItemSeq:
-        FIND FIRST sign_mm_hdr WHERE sign_mm_hdr.batchseq = sign_mm_det.batchseq NO-ERROR.
-        IF AVAIL sign_mm_hdr THEN DO:
-            
-            FIND FIRST signBed NO-LOCK WHERE signBed.Seq = Sign_mm_hdr.bedseq NO-ERROR.
-            
-            cFileLoc = "\\fs02\bullseye\images\agentphotos\Temporary\mtl1\" + sign_mm_hdr.matltype + "\POP 55\batch" + STRING(sign_mm_hdr.batchseq). 
-            IF sign_mm_hdr.bedseq = 0 THEN cFileLoc = cFileLoc + "_1.pdf". ELSE cFileLoc = cFileLoc + "_" + STRING(signBed.imageHeight) + "x" + STRING(signBed.imageWidth) + "_1.pdf".
-            
-            IF SEARCH(cFileLoc) = ? THEN DO:
-                
-                
-                
-            END.
-        END.      
-    END. */   
-    
-    
-END PROCEDURE.
-
-
 PROCEDURE ReadXML:
     DEFINE INPUT PARAMETER FileList AS "System.Collections.Generic.List<character>" NO-UNDO. 
     
@@ -4556,7 +4524,7 @@ PROCEDURE DelCorexPC:
 END PROCEDURE.
 
 
-PROCEDURE imagediff:
+PROCEDURE ImageDiff:
     DEFINE INPUT  PARAMETER cNum AS INT NO-UNDO.
     DEFINE OUTPUT PARAMETER cLog AS LOG NO-UNDO.
 
@@ -4570,7 +4538,8 @@ PROCEDURE imagediff:
     END.
 END.
 
-PROCEDURE logs:
+
+PROCEDURE LogIt:
     DEFINE INPUT PARAMETER cSource     AS INT  NO-UNDO.
     DEFINE INPUT PARAMETER cProcedure  AS CHAR NO-UNDO.
     DEFINE INPUT PARAMETER cStartTime  AS CHAR NO-UNDO.
@@ -4735,9 +4704,11 @@ PROCEDURE logs:
 
 END PROCEDURE.
 
+
 PROCEDURE PrintOrder:
     DEFINE INPUT PARAMETER cItemseq AS CHAR NO-UNDO.
     DEFINE VARIABLE mmCnt        AS INT  NO-UNDO.
+    DEFINE VARIABLE Cnt          AS INT  NO-UNDO.
     DEFINE VARIABLE nextSeq      AS INT  NO-UNDO.
     DEFINE VARIABLE cTemplate    AS CHAR NO-UNDO.
     DEFINE VARIABLE cCreated     AS CHAR NO-UNDO.
@@ -4890,9 +4861,6 @@ PROCEDURE PrintOrder:
             END.
         END.
         
-        RUN logs(9,CHR(10) + CHR(10),STRING(cTime,"HH:MM:SS"),"","").
-        RUN logs(9,"Job Manager Queue Order " + STRING(DATE(TODAY)) + " " + STRING(cTime,"HH:MM:SS"),STRING(cTime,"HH:MM:SS"),"","").
-        RUN logs(9,"Bed Order=" + bednums,STRING(cTime,"HH:MM:SS"),"","").
         
         /*give runseq to the newly created records*/
         IF mmCnt < 100 THEN mmCnt = 100.
@@ -4906,8 +4874,6 @@ PROCEDURE PrintOrder:
                              
                             ASSIGN mmCnt              = mmCnt + 1
                                    sign_mm_hdr.runseq = mmCnt * 10.
-                                   
-                            RUN logs(9,"Batch: " + STRING(sign_mm_hdr.batchseq) + "  " + "Material: " + STRING(sign_mm_hdr.matltype) + "  " + "Create Date: " + STRING(sign_mm_hdr.crt_date) + "  " + "Due Date: " + STRING(sign_mm_hdr.due_date) + "  " + "RunSeq: " + STRING(sign_mm_hdr.runseq) + "  " + "Bedseq: " + STRING(sign_mm_hdr.bedseq),STRING(cTime,"HH:MM:SS"),"","").
                         END.
                     END.
                 END.
@@ -4918,7 +4884,6 @@ PROCEDURE PrintOrder:
                     ASSIGN mmCnt              = mmCnt + 1
                            sign_mm_hdr.runseq = mmCnt * 10.
                     
-                    RUN logs(9,"Batch: " + STRING(sign_mm_hdr.batchseq) + "  " + "Material: " + STRING(sign_mm_hdr.matltype) + "  " + "Create Date: " + STRING(sign_mm_hdr.crt_date) + "  " + "Due Date: " + STRING(sign_mm_hdr.due_date) + "  " + "RunSeq: " + STRING(sign_mm_hdr.runseq) + "  " + "Bedseq: " + STRING(sign_mm_hdr.bedseq),STRING(cTime,"HH:MM:SS"),"","").
                 END.
             END.
             ELSE DO:
@@ -4930,7 +4895,6 @@ PROCEDURE PrintOrder:
                                sign_mm_hdr.runseq = mmCnt * 10.
                                
                                
-                        RUN logs(9,"Batch: " + STRING(sign_mm_hdr.batchseq) + "  " + "Material: " + STRING(sign_mm_hdr.matltype) + "  " + "Create Date: " + STRING(sign_mm_hdr.crt_date) + "  " + "Due Date: " + STRING(sign_mm_hdr.due_date) + "  " + "RunSeq: " + STRING(sign_mm_hdr.runseq) + "  " + "Bedseq: " + STRING(sign_mm_hdr.bedseq),STRING(cTime,"HH:MM:SS"),"","").
                     END.
                 END.
             END.
@@ -5053,7 +5017,6 @@ PROCEDURE PrintOrder:
 END PROCEDURE.
 
 
-
 PROCEDURE RecordHdrDelete:
 /*------------------------------------------------------------------------------
  Purpose:
@@ -5069,7 +5032,7 @@ PROCEDURE RecordHdrDelete:
                zz_file.zz_key2 = "batch" + STRING(inBatchNo)
                zz_file.zz_char[1] = "mm-pp.p"
                zz_file.zz_char[2] = inProcedure
-               zz_file.zz_char[3] = string(today)
+               zz_file.zz_char[3] = STRING(TODAY)
                zz_file.zz_char[4] = STRING(TIME,"HH:MM:SS")
                zz_file.zz_char[6] = "LIVE".
     
@@ -5079,8 +5042,7 @@ PROCEDURE RecordHdrDelete:
 END PROCEDURE.
 
 
-
-PROCEDURE reGroup:
+PROCEDURE Regroup:
     DEFINE INPUT PARAMETER cItemseq AS CHAR NO-UNDO.
     DEFINE VARIABLE tmpchar         AS CHAR NO-UNDO.
     DEFINE VARIABLE tmpint          AS INT  NO-UNDO.
@@ -5221,7 +5183,8 @@ PROCEDURE reGroup:
 
 END PROCEDURE.
 
-PROCEDURE releaseAll:
+
+PROCEDURE ReleaseAll:
     /*this is an attempt to release anything that might still be locked...*/
     /*... in order to prevent record locks in other programs              */
 
@@ -5261,7 +5224,8 @@ PROCEDURE releaseAll:
     IF AVAILABLE  zz_file         THEN RELEASE zz_file.
 END PROCEDURE.
 
-PROCEDURE removeFaults:
+
+PROCEDURE RemoveFaults:
     DEFINE VARIABLE cItemseq AS INT NO-UNDO.
     DEFINE VARIABLE tmpCnt   AS INT NO-UNDO.
     DEFINE VARIABLE alphaOk  AS LOG NO-UNDO.
@@ -5363,7 +5327,8 @@ PROCEDURE removeFaults:
     
 END PROCEDURE.
 
-PROCEDURE removeFIB:
+
+PROCEDURE RemoveFIB:
     /*remove failed image batch*/
     DEFINE INPUT  PARAMETER pBatchList AS CHAR NO-UNDO.
     DEFINE INPUT  PARAMETER whereFrom  AS CHAR NO-UNDO.
@@ -5385,7 +5350,8 @@ PROCEDURE removeFIB:
     END.
 END PROCEDURE.
 
-PROCEDURE removeFiles:
+
+PROCEDURE RemoveFiles:
     DEFINE INPUT PARAMETER inFile  AS CHAR NO-UNDO.
 
     DEFINE VARIABLE fname    AS CHAR   NO-UNDO.
@@ -5448,7 +5414,8 @@ PROCEDURE removeFiles:
     IF VALID-HANDLE(lowHand) THEN INPUT STREAM lowlvl CLOSE.
 END PROCEDURE.
 
-PROCEDURE removeSingle:
+
+PROCEDURE RemoveSingle:
     DEFINE INPUT  PARAMETER cItemseq AS INTEGER NO-UNDO.
     DEFINE OUTPUT PARAMETER cSo      AS CHAR    NO-UNDO.
     DEFINE OUTPUT PARAMETER cItem    AS INTEGER NO-UNDO.
@@ -5477,7 +5444,8 @@ PROCEDURE removeSingle:
     END.
 END PROCEDURE.
 
-PROCEDURE reNumber:
+
+PROCEDURE Renumber:
     DEFINE INPUT  PARAMETER cBed      AS INT  NO-UNDO.
     DEFINE INPUT  PARAMETER oPosition AS INT  NO-UNDO.
     DEFINE INPUT  PARAMETER cType     AS CHAR NO-UNDO.
@@ -5556,7 +5524,8 @@ PROCEDURE reNumber:
     
 END PROCEDURE.
 
-PROCEDURE reportIssues:
+
+PROCEDURE ReportIssues:
     DEFINE INPUT PARAMETER tmpSeq  AS INT  NO-UNDO.
     DEFINE INPUT PARAMETER subject AS CHAR NO-UNDO.
     DEFINE INPUT PARAMETER OrderNo AS CHAR NO-UNDO.
@@ -5600,7 +5569,8 @@ PROCEDURE reportIssues:
     END.
 END PROCEDURE.
 
-PROCEDURE ReSequense:
+
+PROCEDURE Resequense:
     DEFINE VARIABLE newSeq AS INT NO-UNDO.
 
     /*get all of the current batch numbers*/
@@ -5628,7 +5598,8 @@ PROCEDURE ReSequense:
     END.
 END PROCEDURE.
 
-PROCEDURE resets:
+
+PROCEDURE Resets:
     DEFINE INPUT PARAMETER purge      AS LOG  NO-UNDO.
     DEFINE INPUT PARAMETER blankslate AS LOG NO-UNDO.
 
@@ -5729,15 +5700,6 @@ PROCEDURE resets:
                             IF AVAIL(so_file) AND so_file.hold <> "" THEN rFlag = YES.
                         END.
                         ELSE rFlag = YES.
-        
-                        /*make sure that alumalite and omegabonds with bleed do not get deleted!!!*/
-                        FIND FIRST squ_ptdet NO-LOCK WHERE squ_ptdet.itemseq = sign_mm_det.itemseq AND squ_ptdet.TYPE <> "Frame" NO-ERROR.
-                        IF AVAIL squ_ptdet THEN DO:
-                    
-                            RUN checkForBleed (squ_ptdet.subseq,OUTPUT hasBleed).
-                    
-                            IF hasBleed THEN ASSIGN sign_mm_hdr.SAVE_bed = YES.
-                        END.
                     END.
                 END.
             END.
@@ -5874,6 +5836,7 @@ PROCEDURE resets:
     EMPTY TEMP-TABLE ttdel.
 END PROCEDURE.
 
+
 PROCEDURE RptDet:
     DEFINE INPUT PARAMETER cItemseq AS INT  NO-UNDO.
     DEFINE INPUT PARAMETER cSo      AS CHAR NO-UNDO.
@@ -5885,6 +5848,7 @@ PROCEDURE RptDet:
            rpt_det.ITEM_no = cItem.
 
 END PROCEDURE.
+
 
 PROCEDURE RuleOfOne:
     DEFINE INPUT PARAMETER bednum  AS INT NO-UNDO.
@@ -5899,7 +5863,8 @@ PROCEDURE RuleOfOne:
     END.
 END PROCEDURE.
 
-PROCEDURE savedown:
+
+PROCEDURE SaveDown:
     DEFINE INPUT PARAMETER isTTart   AS LOGICAL    NO-UNDO.
     DEFINE INPUT PARAMETER batchno   AS INT        NO-UNDO.
     DEFINE INPUT PARAMETER cFile     AS CHAR       NO-UNDO.
@@ -5922,11 +5887,8 @@ PROCEDURE savedown:
     DEFINE VARIABLE actheight        AS DEC        NO-UNDO.
     DEFINE VARIABLE newName          AS CHAR       NO-UNDO.
 
-    RUN logs(1,"beginning savedown",STRING(cTime,"HH:MM:SS"),"","").
-    RUN logs(99,"Savedown Start: " + string(batchno),STRING(cTime,"HH:MM:SS"),"","").
     
     IF NOT isTTart THEN DO:
-        RUN logs(1,"Regular savedown",STRING(cTime,"HH:MM:SS"),"","").
         FOR EACH b_mm_det /* NO-LOCK */ WHERE b_mm_det.batchseq = batchno:
             ASSIGN cArtfile = b_mm_det.artfile.
             RUN logs(99,"saveDown1.1 - cArtfile:" + cArtfile, "","",""). /*ryanle*/
@@ -5949,16 +5911,15 @@ PROCEDURE savedown:
         END.
     END.
     ELSE DO:
-        RUN logs(1,"bgProcess savedown, Itemseq=" + STRING(batchno) ,STRING(cTime,"HH:MM:SS"),"","").
         FOR EACH ttart WHERE ttArt.ttItemseq = batchno AND ttArt.ttFile = cFile:
             RUN logs(99,"saveDown1.3 - cArtfile:" + ttArt.ttFile, "","",""). /*ryanle*/
             RUN saveDown2(10,ttArt.ttItemseq,ttArt.ttPart,ttArt.ttType,imgSize,doReSize,batchno,INPUT-OUTPUT ttArt.ttFile).
         END.
     END.
-    RUN logs(1,"finished savedown",STRING(cTime,"HH:MM:SS"),"","").
 END PROCEDURE.
 
-PROCEDURE saveDown2:
+
+PROCEDURE SaveDown2:
     DEFINE INPUT PARAMETER pLogNum   AS INTEGER    NO-UNDO.
     DEFINE INPUT PARAMETER pItemseq  AS INTEGER    NO-UNDO.
     DEFINE INPUT PARAMETER pPartNo   AS CHARACTER  NO-UNDO.
@@ -6068,7 +6029,6 @@ PROCEDURE saveDown2:
     
             xmldata = "<Host>ART-JM1</Host><XMLData><Program>SART</Program><XML><myrtle>" + xmldata + "</myrtle></XML></XMLData>".
             
-            RUN logs(pLogNum,"Sending Myrtle Call= " + xmldata,STRING(cTime,"HH:MM:SS"),"","").
             RUN logs(99,"SaveDown2.1 - Myrtle - " + xmlData,"","","").
             
             OUTPUT TO VALUE("\\fs02\bullseye\JM\LIVE\XML\Fred-Myrtle\" + STRING(MTIME) + "_" + STRING(pItemseq) + "-FM.xml").
@@ -6205,17 +6165,19 @@ PROCEDURE saveDown2:
 END PROCEDURE.
 
 
-PROCEDURE setHomeFolder:
-        RUN getDBase (OUTPUT cDBase).
-        IF cDBase <> "Live" THEN DO:
+PROCEDURE SetHomeFolder:
+
+    RUN getDBase (OUTPUT cDBase).
+    IF cDBase <> "Live" THEN DO:
           ASSIGN cHomeFolder  = imageShare + "AgentPhotos\temporary\mtl1-Test"
                  cRanFolder   = imageShare + "AgentPhotos\temporary\CS6-Test\CompletedBatches"
                  cBatchImgLoc = imageShare + "AgentPhotos\temporary\CS6-Test".
-        END.
+    END.
                                            
 END PROCEDURE.
 
-PROCEDURE stripOutValue:
+
+PROCEDURE StripOutValue:
     DEFINE INPUT  PARAMETER pData  AS CHAR NO-UNDO.
     DEFINE INPUT  PARAMETER pNode  AS CHAR NO-UNDO.
     DEFINE OUTPUT PARAMETER pValue AS CHAR NO-UNDO.
@@ -6226,6 +6188,7 @@ PROCEDURE stripOutValue:
            hend   = R-INDEX(pData,REPLACE(pNode,"doc","/doc"))
            pValue = SUBSTRING(pData,hstart + LENGTH(pNode),hend - hstart - LENGTH(pNode)) .
 END PROCEDURE.    
+
 
 PROCEDURE TemplateNest:
     DEFINE INPUT PARAMETER cItemseq AS INT NO-UNDO.
@@ -6243,6 +6206,7 @@ PROCEDURE TemplateNest:
         RUN releaseAll.
     END.    
 END.
+
 
 PROCEDURE TrimBeds:
     DEFINE INPUT PARAMETER deleteNo AS CHAR NO-UNDO.
@@ -6289,7 +6253,8 @@ PROCEDURE TrimBeds:
     END.
 END PROCEDURE.
 
-PROCEDURE trimDoups:
+
+PROCEDURE TrimDoups:
     DEFINE VARIABLE isCopy     AS LOGICAL NO-UNDO.
     DEFINE VARIABLE numDet     AS INTEGER NO-UNDO.
     DEFINE VARIABLE failed     AS LOGICAL NO-UNDO.
@@ -6388,7 +6353,8 @@ PROCEDURE trimDoups:
 
 END PROCEDURE.
 
-PROCEDURE wipeSlate:
+
+PROCEDURE WipeSlate:
     DEFINE INPUT PARAMETER deleteNo AS CHAR NO-UNDO.
     DEFINE INPUT PARAMETER outfile  AS CHAR NO-UNDO.
     DEFINE VARIABLE fName           AS CHAR NO-UNDO.
@@ -6406,266 +6372,8 @@ PROCEDURE wipeSlate:
     END.
 END PROCEDURE.
 
-PROCEDURE zundParse:
-    DEFINE INPUT PARAMETER xmlFile   AS CHAR NO-UNDO.
-    DEFINE INPUT PARAMETER isReprint AS CHAR NO-UNDO.
-    DEFINE INPUT PARAMETER ZundSeq   AS CHAR NO-UNDO.
-    
-    DEFINE BUFFER buf_tXML  FOR tXML.
-    DEFINE BUFFER buf2_tXML FOR tXML.
-    DEFINE BUFFER buf3_tXML FOR tXML.
-    DEFINE BUFFER b_tXml    FOR tXML.
-    DEFINE BUFFER b2_tXml   FOR tXml.
 
-    DEFINE VARIABLE mType     AS CHAR  NO-UNDO.
-    DEFINE VARIABLE nextSeq   AS INT   NO-UNDO.
-    DEFINE VARIABLE tmpImg    AS CHAR  NO-UNDO.
-    DEFINE VARIABLE tmpCnt    AS INT   NO-UNDO.
-    DEFINE VARIABLE cTime     AS INT   NO-UNDO.
-    DEFINE VARIABLE detCnt    AS INT   NO-UNDO.
-    DEFINE VARIABLE t_sqIn    AS DEC   NO-UNDO.
-    DEFINE VARIABLE matRecid  AS RECID NO-UNDO.
-    DEFINE VARIABLE hasbleed  AS LOG   NO-UNDO.
-    DEFINE VARIABLE tmpSubSeq AS INT   NO-UNDO.
-    DEFINE VARIABLE zImages   AS CHAR  NO-UNDO.
-    DEFINE VARIABLE bleed     AS LOG   NO-UNDO.
-    DEFINE VARIABLE foundDiff AS LOG   NO-UNDO.
-
-    EMPTY TEMP-TABLE tXML.
-    RUN xmlParse.p (xmlFile).
-
-    FIND FIRST tXml NO-ERROR.
-    IF NOT AVAILABLE tXML THEN DO:
-        RUN logs(1,"ZundParse - xmlparse failed...returning " ,STRING(cTime,"HH:MM:SS"),"","").
-        RETURN.
-    END.
-
-    FIND FIRST tXml WHERE txml.tNode = "failMsg" NO-ERROR.
-    IF AVAIL tXml THEN DO:
-        RUN logs(1,"ZundParse - prepcenter nest failed...returning " ,STRING(cTime,"HH:MM:SS"),"","").
-        c_to_addr = cProgrammerList + ";barta@lowen.com".
-        ASSIGN c_subject     = "PrepCenter Nest Failed"
-               c_msg         = "Reason: " + tXml.tValue
-               xmlfile       = REPLACE(xmlFile,"response\","")
-               xmlfile       = REPLACE(xmlFile,"Reply","Request")
-               c_attachments = xmlFile.
-        RUN mgemail.p ("Bullseye Database",c_to_addr,"","",c_subject,c_msg,c_attachments,FALSE).
-        RETURN.
-    END.
-
-    /*****Get Media Type*****/
-    FIND FIRST tXml WHERE tXML.tNode = "MediaType" NO-ERROR.
-    IF AVAIL tXML THEN 
-        ASSIGN mType = tXML.tValue.
-    ELSE RETURN.
-
-    /*****Create HDR*****/
-    FOR EACH tXML WHERE tXML.tNode = "Batch":
-        IF ZundSeq = "" THEN DO:
-            nextSeq = NEXT-VALUE(seq-mm-batch).
-            DO WHILE CAN-FIND(sign_mm_hdr WHERE sign_mm_hdr.batchseq = nextSeq):
-                nextSeq = NEXT-VALUE(seq-mm-batch).
-            END.
-    
-            CREATE sign_mm_hdr.
-            ASSIGN sign_mm_hdr.batchseq = nextseq
-                   sign_mm_hdr.matltype = mType
-                   sign_mm_hdr.runseq   = 0
-                   sign_mm_hdr.crt_date = TODAY
-                   sign_mm_hdr.crt_time = TIME
-                   sign_mm_hdr.RUN_date = ?
-                   sign_mm_hdr.RUN_time = ?
-                   sign_mm_hdr.bedseq   = 0    /*no bed seq due to mix and match of zund software*/
-                   sign_mm_hdr.reprint  = IF isReprint <> "" THEN YES ELSE NO
-                   tmpCnt               = 0.
-        END.
-        ELSE DO:
-            FIND sign_mm_hdr WHERE sign_mm_hdr.batchseq = int(ZundSeq) NO-ERROR.
-        END.
-
-        IF NOT AVAIL(sign_mm_hdr) THEN RETURN.
-
-        /*****Get Cut File *****/
-        FIND buf_tXML WHERE buf_txml.tParentSeq = tXml.tSeq AND buf_tXml.tNode = "CutFile" NO-ERROR.
-        IF AVAIL buf_tXml THEN DO:
-
-            ASSIGN buf_tXml.tValue = REPLACE(buf_tXml.tValue,"/","\").
-            ASSIGN sign_mm_hdr.CUT_file = buf_txml.tValue.
-        END.
-
-        /*****Get Number of Copies*****/
-        FIND buf_tXML WHERE buf_txml.tParentSeq = tXml.tSeq AND buf_tXml.tNode = "Copies" NO-ERROR.
-        IF AVAIL buf_tXml THEN DO:
-            ASSIGN sign_mm_hdr.qty = int(buf_tXml.tValue).
-        END.
-
-        /*****get each item on bed*****/
-        detCnt = 0. t_sqIn = 0. bleed = NO.
-        FOR EACH buf_tXml WHERE buf_tXml.tParentseq = tXml.tSeq AND buf_tXml.tNode = "Item":
-            FIND buf2_tXml WHERE buf2_tXml.tparentSeq = buf_tXml.tSeq AND buf2_tXml.tNode = "ItemSeq" NO-ERROR.
-            FIND buf3_tXml WHERE buf3_tXml.tparentSeq = buf_tXml.tSeq AND buf3_tXml.tNode = "Quantity" NO-ERROR.
-            FIND so_items NO-LOCK WHERE so_items.itemseq = int(buf2_tXml.tValue) NO-ERROR.
-            FIND FIRST squ_ptdet NO-LOCK WHERE squ_ptdet.itemseq = int(buf2_tXml.tValue) AND squ_ptdet.TYPE <> "Frame" NO-ERROR.
-
-            /*if missing info then email and delete*/
-            IF buf2_txml.tValue = "" OR buf3_txml.tValue = "" THEN DO:
-                c_to_addr = cProgrammerList + ";barta@lowen.com".
-                ASSIGN c_subject     = "PrepCenter info missing"
-                       c_msg         = "Reply xml missing itemseq or Qty." + CHR(10) + "These records have been removed from JM."
-                       c_attachments = xmlFile.
-                RUN mgemail.p ("Bullseye Database",c_to_addr,"","",c_subject,c_msg,c_attachments,FALSE).
-
-                /*run batch delete programs*/
-                RUN trimbeds (STRING(sign_mm_hdr.batchseq)).
-            END.
-            
-            IF sign_mm_hdr.inv_part = "" AND AVAIL(squ_ptdet) THEN DO:
-                RUN FindMatPanel.p (squ_ptdet.subseq,OUTPUT matRecid).
-                FIND squ_mat NO-LOCK WHERE RECID(squ_mat) = matRecid NO-ERROR.
-                IF AVAIL squ_mat THEN
-                    ASSIGN sign_mm_hdr.inv_part = squ_mat.part_no.
-            END.
-
-            /*don't recreate if its a regen*/
-            IF AVAIL so_items AND AVAIL buf2_tXml AND AVAIL buf3_tXml AND ZundSeq = "" THEN DO:
-                FIND so_file NO-LOCK WHERE so_file.so_no = so_items.so_no NO-ERROR.
-                DO iLoop = 1 TO int(buf3_tXml.tValue):
-                    
-                    zImages = "".
-                    FOR EACH ttart NO-LOCK WHERE ttart.ttItemseq = so_items.itemseq:
-                        zImages = zImages + (IF zImages = "" THEN "" ELSE ",") + ttart.ttfile.
-                    END.
-                    
-                    IF INDEX(zImages,",") = 0 THEN DO:
-                        FIND FIRST so_art NO-LOCK WHERE so_art.itemseq = so_items.itemseq AND so_art.artfile = zImages NO-ERROR.
-                    END.
-
-                    CREATE sign_mm_det.
-                    ASSIGN detCnt                 = detCnt + 1
-                           sign_mm_det.batchseq   = sign_mm_hdr.batchseq
-                           sign_mm_det.part_no    = so_items.part_no
-                           sign_mm_det.itemseq    = so_items.itemseq
-                           sign_mm_det.artlinkseq = IF AVAIL so_art THEN so_art.disp_order ELSE 0
-                           sign_mm_det.artfile    = zImages
-                           sign_mm_det.position   = detCnt 
-                           sign_mm_det.due_date   = so_file.ship_by
-                           sign_mm_det.inv_part   = sign_mm_hdr.inv_part.
-
-                END.
-            END.
-            IF AVAIL squ_ptdet THEN DO:
-                t_sqIn = t_sqIn + (squ_ptdet.PressPrintingHeight * squ_ptdet.PressPrintingWidth * INT(buf3_tXml.tValue)).
-
-                /*if alumalite or omegabond with bleed the cutfile is moved from here as it needs to be routed before printed on*/
-                RUN checkForBleed(squ_ptdet.subseq,OUTPUT hasbleed).
-                IF hasbleed THEN DO:
-
-                END.
-            END.
-        END.
-        IF zundSeq = "" THEN DO:
-            /*set bed efficiency % for a 48x96 sheet or 36x126 for a roll*/
-            IF INDEX(sign_mm_hdr.matltype,"omegabond") > 0 OR INDEX(sign_mm_hdr.matltype,"Alumalite") > 0 THEN
-                ASSIGN sign_mm_hdr.bed_eff = t_sqIn / 4608 * 100.
-            ELSE IF INDEX(sign_mm_hdr.matltype,"magnetic") > 0 OR INDEX(sign_mm_hdr.matltype,"Decal") > 0 THEN
-                ASSIGN sign_mm_hdr.bed_eff = t_sqIn / 4536 * 100.
-    
-            /*if greater than 65% efficency then assume full bed*/
-            IF sign_mm_hdr.bed_eff >= 65 THEN sign_mm_hdr.fullbed  = TRUE.
-        END.
-
-        /*****Get front Image file*****/
-        FIND buf_tXML WHERE buf_txml.tParentSeq = tXml.tSeq AND buf_tXml.tNode = "BatchFileFront" NO-ERROR.
-        IF AVAIL buf_tXml THEN DO:
-            /*rename to our specs*/
-            ASSIGN buf_tXml.tValue = REPLACE(buf_tXml.tValue,"/","\").
-            tmpImg = REPLACE(SEARCH(buf_tXml.tValue),ENTRY(NUM-ENTRIES(SEARCH(buf_tXml.tValue),"\"),SEARCH(buf_tXml.tValue),"\"),"batch" + string(sign_mm_hdr.batchseq)+ "_1.pdf").
-
-/*             IF ZundSeq <> "" THEN DO:                                */
-/*                 IF SEARCH(tmpImg) <> ? THEN OS-DELETE VALUE(tmpImg). */
-/*             END.                                                     */
-
-/*             OS-RENAME VALUE(SEARCH(buf_tXml.tValue)) VALUE(tmpImg). */
-            RUN logs(1,"ZundParse - copy batch image " + buf_tXml.tValue + " to " + tmpimg  ,STRING(cTime,"HH:MM:SS"),"","").
-            OS-COPY VALUE(SEARCH(buf_tXml.tValue)) VALUE(tmpImg).
-            cTime = TIME.
-            FILE-INFO:FILE-NAME = SEARCH(tmpImg).
-            DO WHILE FILE-INFO:FILE-SIZE = ?:
-                IF TIME - cTime > 20 THEN LEAVE.
-                PAUSE 1 NO-MESSAGE.
-            END.
-
-            /* delete copied pdf*/
-/*             OS-DELETE VALUE(search(buf_txml.tValue)). */
-
-            RUN zundRotate (tmpImg,"270").
-            RUN zundJPG (tmpImg).
-
-            ASSIGN sign_mm_hdr.sides = 1.
-        END.
-
-        /*****Get Back Image File*****/
-        FIND buf_tXML WHERE buf_txml.tParentSeq = tXml.tSeq AND buf_tXml.tNode = "BatchFileBack" NO-ERROR.
-        IF AVAIL buf_tXml AND buf_tXml.tVALUE <> "" THEN DO:
-
-            /*rename to our specs*/
-            ASSIGN buf_tXml.tValue = REPLACE(buf_tXml.tValue,"/","\").
-            tmpImg = REPLACE(SEARCH(buf_tXml.tValue),ENTRY(NUM-ENTRIES(SEARCH(buf_tXml.tValue),"\"),SEARCH(buf_tXml.tValue),"\"),"batch" + string(sign_mm_hdr.batchseq)+ "_2.pdf").
-
-/*             IF ZundSeq <> "" THEN DO:                                */
-/*                 IF SEARCH(tmpImg) <> ? THEN OS-DELETE VALUE(tmpImg). */
-/*             END.                                                     */
-
-            RUN imagediff(sign_mm_hdr.batchseq,OUTPUT foundDiff).
-            IF NOT hasBleed THEN foundDiff = YES.
-
-            IF foundDiff THEN DO:
-    /*             OS-RENAME VALUE(SEARCH(buf_tXml.tValue)) VALUE(tmpImg). */
-                RUN logs(1,"ZundParse - copy batch image " + buf_tXml.tValue + " to " + tmpimg  ,STRING(cTime,"HH:MM:SS"),"","").
-                OS-COPY VALUE(SEARCH(buf_tXml.tValue)) VALUE(tmpImg).
-                cTime = TIME.
-                FILE-INFO:FILE-NAME = SEARCH(tmpImg).
-                DO WHILE FILE-INFO:FILE-SIZE = ?:
-                    IF TIME - cTime > 20 THEN LEAVE.
-                    PAUSE 1 NO-MESSAGE.
-                END.
-    
-                /* delete copied pdf*/
-    /*             OS-DELETE VALUE(search(buf_txml.tValue)). */
-
-
-/*                 tmpSubSeq = 0.                                                                                                             */
-/*                 FIND FIRST b_tXml WHERE b_tXml.tParentseq = tXml.tSeq AND b_tXml.tNode = "Item" NO-ERROR.                                  */
-/*                 IF AVAIL b_txml THEN DO:                                                                                                   */
-/*                     FIND b2_tXml WHERE b2_tXml.tparentSeq = b_tXml.tSeq AND b2_tXml.tNode = "ItemSeq" NO-ERROR.                            */
-/*                     IF AVAIL b2_txml THEN DO:                                                                                              */
-/*                         FIND FIRST squ_ptdet NO-LOCK WHERE squ_ptdet.itemseq = int(b2_tXml.tValue) AND squ_ptdet.TYPE <> "Frame" NO-ERROR. */
-/*                         IF AVAIL squ_ptdet THEN DO:                                                                                        */
-/*                             tmpSubSeq = squ_ptdet.subseq.                                                                                  */
-/*                             release squ_ptdet.                                                                                             */
-/*                             RELEASE b_tXml.                                                                                                */
-/*                             RELEASE b2_tXml.                                                                                               */
-/*                         END.                                                                                                               */
-/*                     END.                                                                                                                   */
-/*                 END.                                                                                                                       */
-/*                                                                                                                                            */
-/*                                                                                                                                            */
-/*                 hasBleed = NO.                                                                                                             */
-/*                 IF tmpSubSeq <> 0 THEN RUN checkForBleed(tmpSubSeq,OUTPUT hasBleed).                                                       */
-
-                RUN zundRotate (tmpImg,IF hasBleed THEN "270" ELSE "90").
-                RUN zundJPG (tmpImg).
-            END.
-
-            ASSIGN sign_mm_hdr.sides = 2.
-        END.
-    END.
-    IF AVAILABLE sign_mm_hdr THEN RELEASE sign_mm_hdr.
-    IF AVAILABLE sign_mm_det THEN RELEASE sign_mm_det.
-END PROCEDURE.
-
-
-PROCEDURE zundRotate:
+PROCEDURE ZundRotate:
     DEFINE INPUT PARAMETER cInputFile AS CHAR NO-UNDO.
     DEFINE INPUT PARAMETER cRotate    AS CHAR NO-UNDO.
     DEFINE VARIABLE cResponse AS CHAR NO-UNDO.
@@ -6689,7 +6397,8 @@ PROCEDURE zundRotate:
     END.
 END PROCEDURE.
 
-PROCEDURE zz_control:
+
+PROCEDURE ZZ_Control:
     DEFINE INPUT PARAMETER delme AS LOG  NO-UNDO.
     DEFINE INPUT PARAMETER which AS CHAR NO-UNDO.
     DEFINE VARIABLE cmdline   AS CHAR NO-UNDO.
@@ -6793,7 +6502,8 @@ PROCEDURE zz_control:
     IF AVAILABLE mm_file THEN RELEASE mm_file.
 END PROCEDURE.
 
-PROCEDURE zz_messageCreate:
+
+PROCEDURE ZZ_MessageCreate:
     DEFINE INPUT PARAMETER pType      AS CHARACTER NO-UNDO.
     DEFINE INPUT PARAMETER pUser      AS CHARACTER NO-UNDO.
     DEFINE INPUT PARAMETER pMessage   AS CHARACTER NO-UNDO.
@@ -6811,7 +6521,8 @@ PROCEDURE zz_messageCreate:
     RELEASE zz_msg.
 END PROCEDURE.
 
-PROCEDURE zz_messageDelete:
+
+PROCEDURE ZZ_MessageDelete:
     DEFINE INPUT PARAMETER msgRecid AS CHARACTER NO-UNDO.
     
     FIND buf_zz_msg WHERE RECID(buf_zz_msg) = INTEGER(msgRecid) NO-ERROR.
@@ -6820,13 +6531,15 @@ PROCEDURE zz_messageDelete:
     END.
 END PROCEDURE.
 
-PROCEDURE zz_messageDeleteAll:
+
+PROCEDURE ZZ_MessageDeleteAll:
     FOR EACH zz_msg NO-LOCK WHERE zz_msg.zz_key1 = "MediaManagerMessage":
         RUN zz_messageDelete (zz_msg.zz_key2).
     END.
 END PROCEDURE.
 
-PROCEDURE zz_messageDisplay:
+
+PROCEDURE ZZ_MessageDisplay:
     DEFINE INPUT  PARAMETER pType    AS CHARACTER NO-UNDO.
     DEFINE INPUT  PARAMETER pUser    AS CHARACTER NO-UNDO.
     DEFINE OUTPUT PARAMETER pNumMsgs AS INTEGER   NO-UNDO.
@@ -6844,7 +6557,8 @@ PROCEDURE zz_messageDisplay:
     END.
 END PROCEDURE.
 
-PROCEDURE zz_messageFormat:
+
+PROCEDURE ZZ_MessageFormat:
     DEFINE INPUT        PARAMETER pMsg     AS CHARACTER NO-UNDO.
     DEFINE INPUT        PARAMETER pMsgDT   AS CHARACTER NO-UNDO.
     DEFINE INPUT        PARAMETER pMsgType AS CHARACTER NO-UNDO.
@@ -6858,15 +6572,16 @@ PROCEDURE zz_messageFormat:
 END PROCEDURE.
 
 
-PROCEDURE exportRptDet:
+PROCEDURE ExportRptDet:
     OUTPUT TO VALUE(SESSION:TEMP-DIR + "rpt_det.d").
     FOR EACH rpt_det: EXPORT rpt_det. END.
     OUTPUT CLOSE.
 END PROCEDURE.
 
 
-/*RyanLe - for .150 Poly multibatches*/
-PROCEDURE rerunMultiBatch:  
+PROCEDURE RerunMultiBatch:  
+    /*RyanLe - for .150 Poly multibatches*/
+    
 DEFINE INPUT PARAMETER cBatch     AS CHAR       NO-UNDO.
 DEFINE INPUT PARAMETER cHeight    AS INT        NO-UNDO.
 DEFINE INPUT PARAMETER cWidth     AS INT        NO-UNDO.
@@ -7175,8 +6890,8 @@ DEFINE VARIABLE        batchList2 AS CHAR       NO-UNDO.
 END PROCEDURE.
 
 
-/*RyanLe - break .150 poly multibatches up if needed*/
 PROCEDURE BreakMultiBatch:
+    /*RyanLe - break .150 poly multibatches up if needed*/
 DEFINE INPUT-OUTPUT PARAMETER cBatch    AS CHAR  NO-UNDO. 
 DEFINE INPUT PARAMETER cLimit           AS INT   NO-UNDO.
 
@@ -7249,161 +6964,6 @@ FOR EACH sign_mm_hdr WHERE INDEX(cBatch,STRING(sign_mm_hdr.batchseq)) > 0:
 END.
 
 END PROCEDURE.
-
-
-/*RyanLe - Temp Tables for breaking up Omegabond*/
-DEFINE TEMP-TABLE tmptdet LIKE sign_mm_det.
-DEFINE TEMP-TABLE tmpthdr LIKE sign_mm_hdr
-    FIELD breakUp AS LOGICAL.
-    
-
-    
-/*RyanLe*/
-/*break apart omegabond by part number - due to issues with hole patterns*/
-PROCEDURE BreakOmegaBond:
-    DEFINE VARIABLE cPN    AS CHARACTER NO-UNDO.
-    DEFINE VARIABLE bSeq   AS INT       NO-UNDO.
-    DEFINE VARIABLE crtHdr AS LOGICAL   NO-UNDO.
-    DEFINE VARIABLE cPos   AS INT       NO-UNDO.
-    RUN logs(99,"Start BreakOmegaBond","","","").
-    
-    /*Fill in the temp table records that are omegabond */
-    FOR EACH sign_mm_hdr WHERE sign_mm_hdr.run_date = ? AND sign_mm_hdr.matltype = "OmegaBond" BY fbMachine BY batchseq:
-        CREATE tmpthdr.
-        BUFFER-COPY sign_mm_hdr TO tmpthdr.
-        
-        FOR EACH sign_mm_det NO-LOCK OF sign_mm_hdr:
-            CREATE tmptdet.
-            BUFFER-COPY sign_mm_det TO tmptdet.
-        END.
-    END.
-    
-    /*Determine what needs to be broken up */
-    FOR EACH tmpthdr BY tmpthdr.fbMachine:
-        cPN = "".
-        FOR EACH tmptdet OF tmpthdr:
-            IF cPN = "" THEN cPN = tmptdet.part_no.
-            IF NOT tmptdet.part_no BEGINS cPN THEN tmpthdr.breakUp = YES.
-            IF tmpthdr.breakUp = YES THEN RUN logs(99,"BreakOmegabond BreakUp - " + string(tmpthdr.batchseq),"","","").
-        END.
-    END.
-    
-    /*Blow up miss matched omegabond batches */
-    FOR EACH tmpthdr WHERE tmpthdr.breakUp = YES:
-        ASSIGN cPN    = ""
-               crtHdr = FALSE
-               cPos   = 1.
-              
-        FOR EACH tmptdet OF tmpthdr BY tmptdet.part_no:
-            IF cPN = "" THEN ASSIGN cPN = tmptdet.part_no.
-            
-            IF R-INDEX(cPN,"-") > 0 THEN DO:
-                IF NOT tmptdet.part_no BEGINS SUBSTRING(cPN,1,R-INDEX(cPN,"-") - 1) AND cPN <> tmptdet.part_no THEN DO:
-                    ASSIGN cPN    = tmptdet.part_no
-                           crtHdr = FALSE
-                           cPos   = 1.
-                END.
-            END.
-            ELSE IF cPN <> tmptdet.part_no THEN DO:
-                ASSIGN cPN    = tmptdet.part_no
-                       crtHdr = FALSE
-                       cPos   = 1.
-            END.
-            
-            IF crtHdr = FALSE THEN DO:
-                bSeq = NEXT-VALUE(seq-mm-batch).
-                DO WHILE CAN-FIND(sign_mm_hdr WHERE sign_mm_hdr.batchseq = bSeq):
-                    bSeq = NEXT-VALUE(seq-mm-batch).  
-                END.
-                
-
-                crtHdr = TRUE.
-                CREATE sign_mm_hdr.
-                BUFFER-COPY tmpthdr EXCEPT tmpthdr.batchseq tmpthdr.runseq TO sign_mm_hdr.
-                ASSIGN sign_mm_hdr.batchseq = bSeq
-                       sign_mm_hdr.runseq   = 0
-                       sign_mm_hdr.zzchar_2 = ""
-                       crtHdr               = TRUE.
-                RUN logs(99,"BreakOmegaBond create mm_hdr - " + string(sign_mm_hdr.batchseq),"","","").
-            END.
-            
-            IF crtHdr = TRUE THEN DO:
-                CREATE sign_mm_det.
-                BUFFER-COPY tmptdet EXCEPT tmptdet.batchseq tmptdet.position TO sign_mm_det.
-                ASSIGN sign_mm_det.batchseq = bSeq
-                       sign_mm_det.position = cPos
-                       cPos                 = cPos + 1.
-                RUN logs(99,"BreakOmegaBond create mm_det - " + string(sign_mm_det.batchseq) + " PN: " + sign_mm_det.part_no,"","","").
-            END.              
-        END.  
-        
-        /*Delete the batches that need broken up*/
-        FIND FIRST sign_mm_hdr WHERE sign_mm_hdr.batchseq = tmpthdr.batchseq NO-ERROR.
-        IF AVAIL sign_mm_hdr THEN DO:
-            FOR EACH sign_mm_det OF sign_mm_hdr:
-                RUN logs(99,"BreakOmegaBond delete mm_det - " + string(sign_mm_det.batchseq),"","","").
-                DELETE sign_mm_det.
-            END.
-            RUN logs(99,"BreakOmegaBond delete mm_hdr - " + string(sign_mm_hdr.batchseq),"","","").
-            RUN logs(99,"Delete(6) sign_mm_hdr: " + STRING(sign_mm_hdr.batchseq),"","","").
-            RUN RecordHdrDelete(sign_mm_hdr.batchseq, "rerunMultiBatch").
-            DELETE sign_mm_hdr.
-        END.    
-         
-    END.
-    /*RUN SignlGenXML.*/
-END PROCEDURE.
-
-
-PROCEDURE CropPartials:
-    DEFINE INPUT PARAMETER cInput AS CHARACTER NO-UNDO.
-    
-    DEFINE VARIABLE mtlLoc AS CHARACTER NO-UNDO.
-    DEFINE VARIABLE cMat   AS CHARACTER NO-UNDO.
-    DEFINE VARIABLE art    AS ArtGenerator.
-    art = NEW ArtGenerator().
-    
-    RUN logs(14,"Start CropPartials","","","").
-    FOR EACH sign_mm_hdr NO-LOCK WHERE sign_mm_hdr.run_time = ?
-                                    OR (sign_mm_hdr.run_time <> ? AND sign_mm_hdr.qty <> sign_mm_hdr.qty_printed):
-                                        
-        IF sign_mm_hdr.fullbed = YES THEN NEXT.
-        
-        IF INDEX(sign_mm_hdr.matlType,"Reflective") > 0 THEN DO:
-            cMat = REPLACE(sign_mm_hdr.matlType,"Reflective","").
-            IF INDEX(cMat,"Steel") > 0 THEN cMat = "Steel Ref " + SUBSTRING(cMat,7).
-            ELSE IF INDEX(cMat,"Aluminum") > 0 THEN cMat = "Aluminum Ref " + SUBSTRING(cMat,10).
-            ELSE IF INDEX(cMat,"Poly") > 0 THEN cMat = "Poly Ref " + SUBSTRING(cMat,7).   
-        
-            cMat = REPLACE(cMat,".","").
-            cMat = TRIM(cMat).    
-        END.
-        ELSE cMat = sign_mm_hdr.matlType.
-        
-        FIND FIRST signbed NO-LOCK WHERE signbed.seq = sign_mm_hdr.bedseq NO-ERROR.
-        IF AVAIL signbed THEN mtlLoc = "\\fs02\bullseye\images\agentphotos\Temporary\mtl1\" + cMat + "\POP 55\Batch" + STRING(sign_mm_hdr.batchseq) + "_" + STRING(signBed.imageHeight) + "x" + STRING(signBed.imageWidth) + "_1.pdf".
-        ELSE mtlLoc = "\\fs02\bullseye\images\agentphotos\Temporary\mtl1\" + cMat + "\POP 55\Batch" + STRING(sign_mm_hdr.batchseq) + "_1.pdf".
-            
-        RUN logs(14,"Crop Partial Beds - Batch: " + STRING(sign_mm_hdr.batchseq),"","","").   
-        RUN logs(14,"mtlLoc:" + mtlLoc,"","","").   
-        RUN logs(14,"SEARCH:" + SEARCH(mtlLoc),"","","").
-         
-        IF SEARCH(mtlLoc) <> ? THEN DO:
-            OS-COPY VALUE(mtlLoc) VALUE(REPLACE(mtlLoc,".pdf","_old.pdf")). /*create back up copy*/
-                    
-            art:Preflight(mtlLoc,mtlLoc,"Crop Partial Bed.kfpx").
-                    
-            mtlLoc = REPLACE(mtlLoc,"_1.pdf","_2.pdf").
-            IF SEARCH(mtlLoc) <> ? THEN DO:
-                OS-COPY VALUE(mtlLoc) VALUE(REPLACE(mtlLoc,".pdf","_old.pdf")). /*create back up copy of side 2*/
-                        
-                art:Preflight(mtlLoc,mtlLoc,"Crop Partial Bed.kfpx").    
-             END.                
-        END.
-    END.
-                                     
-END PROCEDURE.
-
 
 
 PROCEDURE RerunCustomSize:

@@ -2753,7 +2753,7 @@ PROCEDURE GenXML:
      END. /*end template batches*/
      
      RUN logs(99,"GenXML - end template batches, start dynamic nest batches.","","","").
-     IF lDynNest THEN DO: /*dynamic nest batches YOUSAF LOOK HERE*/
+     /*IF lDynNest THEN DO: /*dynamic nest batches YOUSAF LOOK HERE*/*/
         RUN logs(99,"GenXML - EnableDynNest = yes","","","").
         numRan = 0.
         FOR EACH sign_mm_hdr WHERE IF cBatch <> "" THEN sign_mm_hdr.rerun = YES  AND sign_mm_hdr.run_time = ? AND sign_mm_hdr.bedseq = 0 
@@ -3121,7 +3121,7 @@ PROCEDURE GenXML:
             END. 
                          
         END. /*end for each sign_mm_hdr*/       
-    END.
+    /*END.*/
           
     iProgFinish = TIME.
 END PROCEDURE.
@@ -6020,18 +6020,18 @@ PROCEDURE saveDown2:
         isFoldOver = pt_det.FoldOver.   
     END.
     
-    IF lDynNest THEN DO:
-        /*patch for dynamic nest passing sizes*/
-        FIND FIRST buf_mm_det NO-LOCK WHERE buf_mm_det.itemseq = pItemseq NO-ERROR.
-        IF AVAILABLE buf_mm_det THEN DO:
+    /*IF lDynNest THEN DO:*/
+    /*patch for dynamic nest passing sizes*/
+    FIND FIRST buf_mm_det NO-LOCK WHERE buf_mm_det.itemseq = pItemseq NO-ERROR.
+    IF AVAILABLE buf_mm_det THEN DO:
             FIND buf_mm_hdr NO-LOCK WHERE buf_mm_hdr.batchseq = buf_mm_det.batchseq NO-ERROR.
             IF AVAILABLE buf_mm_hdr AND buf_mm_hdr.bedseq = 0 THEN DO:
                 pImgSize = STRING(actheight) + "x" + STRING(actwidth).
             END.
-        END.
-        IF AVAILABLE buf_mm_hdr THEN RELEASE buf_mm_hdr.
-        IF AVAILABLE buf_mm_hdr THEN RELEASE buf_mm_det.
     END.
+    IF AVAILABLE buf_mm_hdr THEN RELEASE buf_mm_hdr.
+    IF AVAILABLE buf_mm_hdr THEN RELEASE buf_mm_det.
+    /*END.*/
     
     FIND FIRST so_items NO-LOCK WHERE so_items.itemseq = pItemseq NO-ERROR. /*ryanle*/
     FIND FIRST so_file NO-LOCK WHERE so_file.so_no = so_items.so_no NO-ERROR. 
@@ -6234,21 +6234,13 @@ PROCEDURE TemplateNest:
     IF AVAILABLE so_items THEN DO:
         RUN buildtt      (so_items.so_no,so_items.ITEM_no).
         RUN checkImages  (so_items.itemseq).
-       
-        IF lDynNest = FALSE THEN DO:
-            RUN zundArt.
-            RUN zundSend ("","").
-        END.
     
         RUN grouping     ("").
         RUN regroup      ("").
+        RUN DynamicNest ("12345").
         
-        IF lDynNest THEN DO:
-            RUN DynamicNest ("12345").
-        END.
-        
-        RUN trimdoups   .
-        RUN releaseAll  .
+        RUN trimdoups.
+        RUN releaseAll.
     END.    
 END.
 
@@ -6312,9 +6304,9 @@ PROCEDURE trimDoups:
     DEFINE VARIABLE badbeds    AS CHAR    NO-UNDO.
 
     /*only look at records that were created throught JM batching not prepcenter*/
-    FOR EACH sign_mm_hdr WHERE sign_mm_hdr.RUN_date = ? AND
-            (sign_mm_hdr.fullbed = TRUE OR sign_mm_hdr.bedseq = 0) AND
-            (IF lDynNest = FALSE THEN sign_mm_hdr.bedseq <> 0 ELSE TRUE):
+    FOR EACH sign_mm_hdr WHERE  sign_mm_hdr.RUN_date = ? 
+                           AND (sign_mm_hdr.fullbed = TRUE OR sign_mm_hdr.bedseq = 0):
+                        /* AND (IF lDynNest = FALSE THEN sign_mm_hdr.bedseq <> 0 ELSE TRUE):*/
         IF sign_mm_hdr.zzchar_1 = "PrimeCenter" THEN NEXT.
         tmpString = "".
         FOR EACH sign_mm_det NO-LOCK OF sign_mm_hdr:
@@ -6334,15 +6326,15 @@ PROCEDURE trimDoups:
         sign_mm_hdr.cloneValue = md5.
     END.
 
-    FOR EACH sign_mm_hdr WHERE sign_mm_hdr.RUN_date = ? AND
-            (sign_mm_hdr.fullbed = TRUE OR sign_mm_hdr.bedseq = 0) AND
-            (IF lDynNest = FALSE THEN sign_mm_hdr.bedseq <> 0 ELSE TRUE):
+    FOR EACH sign_mm_hdr WHERE  sign_mm_hdr.RUN_date = ? 
+                           AND (sign_mm_hdr.fullbed = TRUE OR sign_mm_hdr.bedseq = 0) 
+                           /*AND (IF lDynNest = FALSE THEN sign_mm_hdr.bedseq <> 0 ELSE TRUE)*/:
         IF sign_mm_hdr.zzchar_1 = "PrimeCenter" THEN NEXT.
         IF sign_mm_hdr.cloneValue = "" THEN NEXT.
-        FOR EACH b_mm_hdr WHERE b_mm_hdr.RUN_date = ? AND
-            (b_mm_hdr.fullbed = TRUE OR b_mm_hdr.bedseq = 0) AND
-            (IF lDynNest = FALSE THEN b_mm_hdr.bedseq <> 0 ELSE TRUE) AND 
-            b_mm_hdr.bedseq = sign_mm_hdr.bedseq:
+        FOR EACH b_mm_hdr WHERE  b_mm_hdr.RUN_date = ? 
+                            AND (b_mm_hdr.fullbed = TRUE OR b_mm_hdr.bedseq = 0) 
+                            /*AND (IF lDynNest = FALSE THEN b_mm_hdr.bedseq <> 0 ELSE TRUE)*/
+                            AND b_mm_hdr.bedseq = sign_mm_hdr.bedseq:
             IF b_mm_hdr.cloneValue = ""                   THEN NEXT.
             IF b_mm_hdr.batchseq   = sign_mm_hdr.batchseq THEN NEXT.
 

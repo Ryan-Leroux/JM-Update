@@ -3,11 +3,10 @@
 
 DEFINE {1} SHARED VARIABLE cHomeFolder           AS CHARACTER  NO-UNDO.   
 DEFINE {1} SHARED VARIABLE cBatchImgLoc          AS CHARACTER  NO-UNDO.
-DEFINE {1} SHARED VARIABLE cLogFolder            AS CHARACTER NO-UNDO INITIAL "\\QBTEST\Bullseye\Scripts\Logfiles\".    
+DEFINE {1} SHARED VARIABLE cLogFolder            AS CHARACTER  NO-UNDO INITIAL "\\QBTEST\Bullseye\Scripts\Logfiles\".    
 DEFINE {1} SHARED VARIABLE cRanFolder            AS CHARACTER  NO-UNDO.      
 DEFINE {1} SHARED VARIABLE cLogLoc               AS CHARACTER  NO-UNDO.          
-DEFINE {1} SHARED VARIABLE iCheckIn           AS INTEGER    NO-UNDO.
-DEFINE {1} SHARED VARIABLE lDynNest         AS LOGICAL    NO-UNDO INITIAL YES. /* turns on dynamic nest*/
+DEFINE {1} SHARED VARIABLE iCheckIn              AS INTEGER    NO-UNDO.
 
 ASSIGN cHomeFolder  = imageShare + "agentphotos\temporary\mtl1"
        cBatchImgLoc = imageShare + "AgentPhotos\temporary\CS6"

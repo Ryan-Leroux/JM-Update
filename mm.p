@@ -81,19 +81,10 @@ END.
     IF purge = NO THEN RUN TrimBeds IN mm-pp-handle ("").
     RUN logs         IN mm-pp-handle (1,"MM-Trimbeds Finished","","","").
 
-    IF EnableDynNest THEN DO:
-        RUN DynamicNest  IN mm-pp-handle("").
-        RUN logs         IN mm-pp-handle (1,"MM-DynamicNest Finished","","","").
-    END.
+    RUN DynamicNest  IN mm-pp-handle("").
+    RUN logs         IN mm-pp-handle (1,"MM-DynamicNest Finished","","","").
 
     RUN releaseAll   IN mm-pp-handle.
-
-    IF NOT EnableDynNest THEN DO:
-        RUN zundArt      IN mm-pp-handle.
-        RUN logs         IN mm-pp-handle (1,"MM-ZundArt","","","").
-     
-        RUN logs         IN mm-pp-handle (1,"MM-ZundSend","","","").
-    END.
     
     RUN TrimDoups    IN mm-pp-handle.
     RUN logs         IN mm-pp-handle (1,"MM-TrimDoups Finished","","",""). 
@@ -108,11 +99,6 @@ END.
     
     RUN genXml       IN mm-pp-handle ("").
     RUN logs         IN mm-pp-handle (1,"MM-GenXML Finished","","","").   
-    
-    /*Crop Partial Beds on Digitech
-    RUN CropPartials IN mm-pp-handle ("").
-    RUN logs         IN mm-pp-handle (1,"MM-CropPartials Finished","","","").
-    */  
  
     RUN email        IN mm-pp-handle.
     RUN logs         IN mm-pp-handle (1,"MM-Email Finished","","","").

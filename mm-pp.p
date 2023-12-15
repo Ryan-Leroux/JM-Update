@@ -6,7 +6,7 @@ USING PROGRESS.Json.ObjectModel.*.
   Input Parameters.:
   Output Parameters:
   Author...........: Terry Penny
-  Created..........: ?
+  Created..........: ?(2017)
 -----------------------------------------------------------------------------*/
 /*****************************************************************************/
 /*                            Modification Log                               */
@@ -177,7 +177,7 @@ DEFINE BUFFER b_items        FOR so_items.
 DEFINE BUFFER b_so_items     FOR so_items.
 DEFINE BUFFER buf_so_items   FOR so_items.
 DEFINE BUFFER b_squ_plan     FOR squ_plan.
-DEFINE BUFFER mm_file        FOR zz_file.
+DEFINE BUFFER buf_zz_file    FOR zz_file.
 DEFINE BUFFER zz_msg         FOR zz_file.
 DEFINE BUFFER buf_zz_msg     FOR zz_file.
 
@@ -444,36 +444,43 @@ END PROCEDURE.
 
 
 PROCEDURE CanIRun:
-    DEFINE INPUT  PARAMETER toDo AS CHAR NO-UNDO.
-    DEFINE OUTPUT PARAMETER c_ok AS LOG  NO-UNDO.
+/*------------------------------------------------------------------------------
+ Purpose: Set the zz_file records used to tell if the JM is actively running
+ 
+ INPUTS:  pMode:  Start or End of JM running       
+ 
+ OUTPUTS: oRunJM: Can we run JM(Y/N)
+ 
+ Notes:
+------------------------------------------------------------------------------*/
+    DEFINE INPUT  PARAMETER pMode  AS CHAR NO-UNDO.
+    DEFINE OUTPUT PARAMETER oRunJM AS LOG  NO-UNDO.
+    
     DEFINE VARIABLE cmdline      AS CHAR NO-UNDO.
     DEFINE VARIABLE lines        AS CHAR NO-UNDO EXTENT 10.
 
-    IF toDo = "Start" THEN DO:
-        /*when Jm runs it creates a zz_file record with these parameters. this ensures the program doesnt get ran while it is already running*/
-        FIND zz_file NO-LOCK WHERE zz_file.zz_key1 = "MediaManager" AND zz_file.zz_key2 = "MM-Running" NO-ERROR.
+    IF pMode = "Start" THEN DO:
+        
+        /*This ensures that JM doesnt get ran while it is already running*/
+        FIND zz_file NO-LOCK WHERE zz_file.zz_key1 = "MediaManager" 
+                               AND zz_file.zz_key2 = "MM-Running" NO-ERROR.
         IF NOT AVAIL zz_file THEN DO:
-
 
             /*creates the zz_file record*/
             RUN zz_control(NO,"PID").
             RUN zz_control(NO,"MM-Running").
-            /*OK to run*/
-            c_ok = YES.
+            oRunJM = YES.
+            
         END.
-        ELSE DO: 
-            /*not ok to run*/
-            c_ok = NO.
-        END.
-        IF AVAIL zz_file THEN RELEASE zz_file.
-        IF AVAIL mm_file THEN RELEASE mm_file.
-
-
+        ELSE oRunJM = NO. /* We're already running JM */
+       
     END.
     ELSE DO:
+        
         /*OK to run*/
         RUN zz_control (YES,"MM-Running").
-        c_ok = YES.
+        oRunJM = YES.
+        
     END.
     
 END PROCEDURE.
@@ -1084,12 +1091,6 @@ PROCEDURE CheckTemplates:
         ELSE ASSIGN cTemplate = "bed-" + cTemplate + ".pdf".
 
         ASSIGN cTemplate = TemplateLoc + cTemplate.
-        FIND mm_file WHERE mm_file.zz_key1 = "MM-Templates" AND mm_file.zz_key2 = string(signbed.seq) NO-ERROR.
-        IF AVAIL mm_file AND mm_file.zz_dec[1] = DEC(STRING(tempSum,"->>,>>>.99")) AND SEARCH(cTemplate) <> ? THEN DO:
-            /*nothing*/
-        END.
-
-        IF AVAILABLE mm_file THEN RELEASE mm_file.
     END.
 END PROCEDURE.
 
@@ -4823,7 +4824,6 @@ PROCEDURE ReleaseAll:
     IF AVAILABLE  b_items        THEN RELEASE b_items.
     IF AVAILABLE  b_so_items     THEN RELEASE b_so_items.
     IF AVAILABLE  b_squ_plan     THEN RELEASE b_squ_plan.
-    IF AVAILABLE  mm_file        THEN RELEASE MM_FILE.
     IF AVAILABLE  zz_msg         THEN RELEASE zz_msg.
 
     /*release all normal records*/
@@ -5962,21 +5962,30 @@ END PROCEDURE.
 
 
 PROCEDURE ZZ_Control:
-    DEFINE INPUT PARAMETER delme AS LOG  NO-UNDO.
-    DEFINE INPUT PARAMETER which AS CHAR NO-UNDO.
-    DEFINE VARIABLE cmdline   AS CHAR NO-UNDO.
-    DEFINE VARIABLE pList     AS CHAR NO-UNDO.
-    DEFINE VARIABLE isPrimary AS LOG NO-UNDO.
+/*------------------------------------------------------------------------------
+ Purpose: Used to create the zz_file records telling if JM is running & the PIDs
+ 
+ INPUTS:  pMode:  Start or End of JM running       
+ 
+ OUTPUTS: oRunJM: Can we run JM(Y/N)
+ 
+ Notes:
+------------------------------------------------------------------------------*/
+    DEFINE INPUT PARAMETER pDel     AS LOG  NO-UNDO. /* Delete the zz_file? (Y/N) */
+    DEFINE INPUT PARAMETER pKey2    AS CHAR NO-UNDO. /* zz_file.zz_key2 value we want to find */
     
-    DEFINE VARIABLE iProcessHandle AS INT NO-UNDO. /* Current Proccess ID */
+    DEFINE VARIABLE CMDLine         AS CHAR NO-UNDO. /* Command Line Text */
+    DEFINE VARIABLE ProgramList     AS CHAR NO-UNDO. 
+    DEFINE VARIABLE IsPrimary       AS LOG  NO-UNDO.
+    DEFINE VARIABLE ProcessHandle   AS INT  NO-UNDO. /* Current Proccess ID */
     
-
-    RUN progList.p(OUTPUT pList).
+    RUN progList.p(OUTPUT ProgramList).
+    
     /*does this come from bgmm or mm-look?*/
-    isPrimary = IF INDEX(pList,"mm-look") = 0 THEN YES ELSE NO.
+    IsPrimary = IF INDEX(ProgramList,"mm-look") = 0 THEN YES ELSE NO.
 
-    IF NOT delMe THEN DO: /*creating*/
-        CASE which:
+    IF pDel = FALSE THEN DO: /*creating*/
+        CASE pKey2:
             WHEN "MM-Running" THEN DO:
                 FIND zz_file NO-LOCK WHERE zz_file.zz_key1 = "MediaManager" AND zz_file.zz_key2 = "MM-Running" NO-ERROR.
                 IF NOT AVAIL zz_file THEN DO:
@@ -5998,40 +6007,31 @@ PROCEDURE ZZ_Control:
                 END.
             END.
             WHEN "PID" THEN DO:
-                iProcessHandle = 0.
-                RUN GetCurrentProcessId (OUTPUT iProcessHandle).
+                ProcessHandle = 0.
+                RUN GetCurrentProcessId (OUTPUT ProcessHandle).
                 
                 /*kill any open bgmm.p processes that are not this one*/
-                FOR EACH mm_file WHERE mm_file.zz_key1 = "MediaManager" AND mm_file.zz_key2 = "PID":
-                    IF STRING(iProcessHandle) <> mm_file.zz_char[1] THEN DO:
-                        cmdline = "taskkill /t /f /pid " + mm_file.zz_char[1].
-                        OS-COMMAND SILENT VALUE(cmdline).
+                FOR EACH buf_zz_file WHERE buf_zz_file.zz_key1 = "MediaManager" 
+                                       AND buf_zz_file.zz_key2 = "PID":
+                    IF STRING(ProcessHandle) <> buf_zz_file.zz_char[1] THEN DO:
+                        CMDLine = "taskkill /t /f /pid " + buf_zz_file.zz_char[1].
+                        OS-COMMAND SILENT VALUE(CMDLine).
                     END.
-                    DELETE mm_file.
+                    DELETE buf_zz_file.
                 END.
                 
-                IF iProcessHandle <> 0 THEN DO:
-                    CREATE mm_file.
-                    ASSIGN mm_file.zz_key1    = "MediaManager"
-                           mm_file.zz_key2    = "PID"
-                           mm_file.zz_char[1] = STRING(iProcessHandle)
-                           mm_file.zz_char[2] = STRING(TIME).
+                IF ProcessHandle <> 0 THEN DO:
+                    CREATE buf_zz_file.
+                    ASSIGN buf_zz_file.zz_key1    = "MediaManager"
+                           buf_zz_file.zz_key2    = "PID"
+                           buf_zz_file.zz_char[1] = STRING(ProcessHandle)
+                           buf_zz_file.zz_char[2] = STRING(TIME).
                 END.
             END.
-            WHEN "JM-ReprintLock" THEN DO:
-                FIND zz_file NO-LOCK WHERE zz_file.zz_key1 = "MediaManager" AND zz_file.zz_key2 = "JM-ReprintLock" NO-ERROR.
-                IF NOT AVAILABLE zz_file THEN DO:
-                    CREATE zz_file.
-                    ASSIGN zz_file.zz_key1 = "MediaManager"
-                           zz_file.zz_key2 = "JM-ReprintLock". 
-                END.   
-            END.
         END CASE.
-        IF AVAILABLE zz_file THEN RELEASE zz_file.
-        IF AVAILABLE mm_file THEN RELEASE mm_file.
     END.
     ELSE DO: /*deleting*/
-        CASE which:
+        CASE pKey2:
             WHEN "MM-Running" THEN DO:
                 FOR EACH zz_file WHERE zz_file.zz_key1 = "MediaManager" AND zz_file.zz_key2 = "MM-Running":
                     DELETE zz_file.
@@ -6043,94 +6043,21 @@ PROCEDURE ZZ_Control:
                 END.
             END.
             WHEN "PID" THEN DO:
-                iProcessHandle = 0.
-                RUN GetCurrentProcessId (OUTPUT iProcessHandle).
+                ProcessHandle = 0.
+                RUN GetCurrentProcessId (OUTPUT ProcessHandle).
                 
                 /*kill any open bgmm.p processes that are not this one*/
-                FOR EACH mm_file WHERE mm_file.zz_key1 = "MediaManager" AND mm_file.zz_key2 = "PID":
-                    IF STRING(iProcessHandle) <> mm_file.zz_char[1] THEN DO:
-                        cmdline = "taskkill /t /f /pid " + mm_file.zz_char[1].
-                        OS-COMMAND SILENT VALUE(cmdline).
+                FOR EACH buf_zz_file WHERE buf_zz_file.zz_key1 = "MediaManager" AND buf_zz_file.zz_key2 = "PID":
+                    IF STRING(ProcessHandle) <> buf_zz_file.zz_char[1] THEN DO:
+                        CMDLine = "taskkill /t /f /pid " + buf_zz_file.zz_char[1].
+                        OS-COMMAND SILENT VALUE(CMDLine).
                     END.
-                    DELETE mm_file.
+                    DELETE buf_zz_file.
                 END.
-            END.
-            WHEN "JM-ReprintLock" THEN DO:
-                FIND FIRST zz_file WHERE zz_file.zz_key1 = "MediaManager" AND zz_file.zz_key2 = "JM-ReprintLock" NO-ERROR.
-                IF AVAILABLE zz_file THEN DELETE zz_file.                   
             END.
         END CASE.
     END.
-    IF AVAILABLE zz_file THEN RELEASE zz_file.
-    IF AVAILABLE mm_file THEN RELEASE mm_file.
-END PROCEDURE.
-
-
-PROCEDURE ZZ_MessageCreate:
-    DEFINE INPUT PARAMETER pType      AS CHARACTER NO-UNDO.
-    DEFINE INPUT PARAMETER pUser      AS CHARACTER NO-UNDO.
-    DEFINE INPUT PARAMETER pMessage   AS CHARACTER NO-UNDO.
-    
-    CREATE zz_msg.
-    ASSIGN zz_msg.zz_key1    = "MediaManagerMessage"
-           zz_msg.zz_key2    = STRING(RECID(zz_msg))
-           zz_msg.zz_key3    = pUser
-           zz_msg.zz_char[1] = pType
-           zz_msg.zz_char[2] = pMessage
-           zz_msg.zz_char[3] = STRING(DATE(TODAY))
-           zz_msg.zz_char[4] = STRING(TIME,"HH:MM:SS")
-           zz_msg.zz_char[5] = STRING(DATETIME(DATE(TODAY),MTIME))
-           zz_msg.zz_log[1]  = FALSE.
-    RELEASE zz_msg.
-END PROCEDURE.
-
-
-PROCEDURE ZZ_MessageDelete:
-    DEFINE INPUT PARAMETER msgRecid AS CHARACTER NO-UNDO.
-    
-    FIND buf_zz_msg WHERE RECID(buf_zz_msg) = INTEGER(msgRecid) NO-ERROR.
-    IF AVAILABLE buf_zz_msg THEN DO:
-        DELETE buf_zz_msg.
-    END.
-END PROCEDURE.
-
-
-PROCEDURE ZZ_MessageDeleteAll:
-    FOR EACH zz_msg NO-LOCK WHERE zz_msg.zz_key1 = "MediaManagerMessage":
-        RUN zz_messageDelete (zz_msg.zz_key2).
-    END.
-END PROCEDURE.
-
-
-PROCEDURE ZZ_MessageDisplay:
-    DEFINE INPUT  PARAMETER pType    AS CHARACTER NO-UNDO.
-    DEFINE INPUT  PARAMETER pUser    AS CHARACTER NO-UNDO.
-    DEFINE OUTPUT PARAMETER pNumMsgs AS INTEGER   NO-UNDO.
-    DEFINE OUTPUT PARAMETER pMessage AS CHARACTER NO-UNDO.
-   
-    pMessage = "". pNumMsgs = 0.
-    FOR EACH zz_msg NO-LOCK WHERE zz_msg.zz_key1 = "MediaManagerMessage" AND 
-                                  zz_msg.zz_key3 = pUser AND 
-                                  (IF pType = "All" THEN TRUE ELSE zz_msg.zz_char[1] = pType) AND 
-                                  zz_msg.zz_log[1] = FALSE 
-                                  BY zz_msg.zz_char[5]:
-        pNumMsgs = pNumMsgs + 1.
-        RUN zz_messageFormat (zz_msg.zz_char[2],zz_msg.zz_char[5],zz_msg.zz_char[1],INPUT-OUTPUT pMessage).
-        RUN zz_messageDelete (zz_msg.zz_key2).
-    END.
-END PROCEDURE.
-
-
-PROCEDURE ZZ_MessageFormat:
-    DEFINE INPUT        PARAMETER pMsg     AS CHARACTER NO-UNDO.
-    DEFINE INPUT        PARAMETER pMsgDT   AS CHARACTER NO-UNDO.
-    DEFINE INPUT        PARAMETER pMsgType AS CHARACTER NO-UNDO.
-    DEFINE INPUT-OUTPUT PARAMETER pMessage AS CHARACTER NO-UNDO.
-    
-    pMessage = pMessage + 
-               pMsgDT   + CHR(10) +
-               "*** " + pMsgType + " ***" + CHR(10) +
-               pMsg     + CHR(10) + CHR(10).
+    RELEASE zz_file.
     
 END PROCEDURE.
 

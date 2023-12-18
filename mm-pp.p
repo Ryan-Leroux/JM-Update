@@ -45,9 +45,6 @@ DEFINE VARIABLE cProgrammerList  AS CHARACTER NO-UNDO INITIAL "webteam@lowen.com
 {dynamicNest.i}
 
 /****************** Streams **************************************************/
-DEFINE STREAM toplvl. 
-DEFINE STREAM midlvl.
-DEFINE STREAM lowlvl.
 DEFINE STREAM S1.
 DEFINE STREAM S2.
 
@@ -87,31 +84,13 @@ DEFINE TEMP-TABLE ttChg
     FIELD ttQty  AS INT
     INDEX ttPart AS UNIQUE ttPart.
 
-DEFINE TEMP-TABLE ttorder
-    FIELD ttseq  AS INT 
-    FIELD ttseq2 AS INT 
-    FIELD ttqty  AS INT
-    FIELD ttdate AS INT
-    FIELD ttInv  AS CHAR
-    FIELD ttType AS CHAR
-    FIELD ttprty AS DEC.
-
 DEFINE TEMP-TABLE ttSeq
     FIELD ttSeqnum AS INT
     INDEX ttSeqNum AS UNIQUE ttSeqNum.
 
-DEFINE TEMP-TABLE ttdel
-    FIELD ttitemseq AS INT
-    INDEX ttitemseq AS UNIQUE ttitemseq.
-
 DEFINE TEMP-TABLE tBatches NO-UNDO
     FIELD batchseq AS INTEGER
-    INDEX batchseq IS PRIMARY UNIQUE batchseq.
-
-DEFINE TEMP-TABLE saves
-    FIELD sBatch  AS CHAR
-    FIELD sLoc    AS CHAR
-    FIELD sTmpLoc AS CHAR. 
+    INDEX batchseq IS PRIMARY UNIQUE batchseq. 
 
 DEFINE TEMP-TABLE issue
     FIELD xSubject AS CHAR
@@ -189,6 +168,40 @@ ASSIGN iProgStart  = TIME
        iProgFinish = ?.
 
 /* **********************  Internal Procedures  *********************** */
+
+
+PROCEDURE Archive:
+/*------------------------------------------------------------------------------
+ Purpose: Loop through folder & move files into "History" folder 
+ 
+ INPUTS:  pPath    -> File path to explore
+          pMatches -> Value to see if file path matches  
+ 
+ Notes:
+------------------------------------------------------------------------------*/
+    DEFINE INPUT PARAMETER pPath    AS CHARACTER NO-UNDO.
+    DEFINE INPUT PARAMETER pMatches AS CHARACTER NO-UNDO.
+    
+    DEFINE VARIABLE        TmpFile  AS CHARACTER NO-UNDO.
+    
+    FILE-INFO:FILE-NAME = pPath.
+    
+    /* Check if file path is valid */
+    IF FILE-INFO:FULL-PATHNAME = ? THEN RETURN.
+    
+    RUN LogIt(5,"Procedure:Archive -> " + pPath).
+    INPUT STREAM S1 FROM OS-DIR(pPath).
+    REPEAT:
+        IMPORT STREAM S1 TmpFile.
+        IF LOOKUP(TmpFile,".,..") > 0 THEN NEXT.
+        IF NOT TmpFile MATCHES pMatches THEN NEXT.
+        
+        OS-COPY VALUE(FILE-INFO:FULL-PATHNAME) VALUE(pPath + "\History\" + TmpFile).
+        RUN Logs(5,"Copy(" + STRING(OS-ERROR) + "):" + pPath + "\History\" + TmpFile).
+    END.
+    INPUT STREAM S1 CLOSE.    
+    
+END PROCEDURE.
 
 
 PROCEDURE BuildTT:
@@ -2193,6 +2206,64 @@ PROCEDURE FindSpace:
 
         IF cBed = 30 OR cBed = 80 OR cBed = 159 OR cBed = 167 OR cBed = 168 OR cBed = 175  THEN 
             cSpace = 0.
+    END.
+
+END PROCEDURE.
+
+
+PROCEDURE FolderMaintenance:
+/*------------------------------------------------------------------------------
+ Purpose: Output batch data for archiving
+ 
+ INPUTS:  pPurge   -> Determines if full JM run (Y/N)
+ 
+ Notes:
+------------------------------------------------------------------------------*/
+    DEFINE INPUT PARAMETER pPurge AS LOGICAL NO-UNDO.
+    
+    /* Loop through all the substrate folders & remove images */
+    IF pPurge = TRUE THEN DO:
+        FOR EACH Substrates NO-LOCK:
+            FILE-INFO:FILE-NAME = cHomeFolder + "\" + Substrates.subName.
+            RUN Archive(FILE-INFO:FULL-PATHNAME,".pdf").
+        END.
+        RUN RemoveFiles(cHomeFolder,2). 
+    END.
+    
+    /* Sunday only housekeeping on files */
+    IF WEEKDAY(TODAY) = 1 THEN DO:
+        
+        /* Clean up batch files */
+        FOR EACH Substrates NO-LOCK:
+            FILE-INFO:FILE-NAME = cHomeFolder + "\" + Substrates.subName.
+            RUN Archive(FILE-INFO:FULL-PATHNAME,".pdf").
+        END.
+        RUN RemoveFiles(cHomeFolder,2).
+        
+        /* Clean up SO item's art aka "CS6" */
+        FILE-INFO:FILE-NAME = cBatchImgLoc.
+        IF FILE-INFO:FULL-PATHNAME = ? THEN OS-CREATE-DIR VALUE(cBatchImgLoc).
+        RUN RemoveFiles(cBatchImgLoc,1).
+        
+    END.
+    
+    /* First of the month housekeeping */
+    IF DAY(TODAY) = 1 THEN DO:
+        
+        /* Clean up JM Logs */
+        FILE-INFO:FILE-NAME = cLogLoc.
+        IF FILE-INFO:FULL-PATHNAME = ? THEN OS-CREATE-DIR VALUE(cLogLoc).
+        RUN Archive(cLogLoc,".xlsx"). /* Save all .xlsx files */
+        RUN Archive(cLogLoc,".log").  /* Save all .log files  */
+        RUN Archive(cLogLoc,".md").   /* Save all .md files   */
+        RUN RemoveFiles(cLogLoc,1).   /* Delete the remaining files in the log folder */ 
+        
+    END.
+    
+    /* Just in case a substrate mtl folder got deleted */
+    FOR EACH Substrates NO-LOCK:
+        FILE-INFO:FILE-NAME = cHomeFolder + "\" + Substrates.subName.
+        IF FILE-INFO:FULL-PATHNAME = ? THEN OS-CREATE-DIR VALUE(FILE-INFO:FULL-PATHNAME).
     END.
 
 END PROCEDURE.
@@ -4643,25 +4714,28 @@ END PROCEDURE.
 
 PROCEDURE RecordHdrDelete:
 /*------------------------------------------------------------------------------
- Purpose:
+ Purpose: Output batch data for archiving
+ 
+ INPUTS:  pBatchNo   -> Current Batch Seq
+          pProcedure -> Name of the procedure this came from
+ 
  Notes:
 ------------------------------------------------------------------------------*/
-    DEFINE INPUT PARAMETER inBatchNo   AS INT  NO-UNDO.
-    DEFINE INPUT PARAMETER inProcedure AS CHAR NO-UNDO.
+    DEFINE INPUT PARAMETER pBatchNo   AS INT  NO-UNDO.
+    DEFINE INPUT PARAMETER pProcedure AS CHAR NO-UNDO.
     
-    FIND zz_file WHERE zz_file.zz_key1 = "mm-delete" AND zz_file.zz_key2 = "batch" + STRING(inBatchNo) NO-ERROR.
-    IF NOT AVAIL zz_file THEN DO:
-        CREATE zz_file.
-        ASSIGN zz_file.zz_key1 = "mm-delete"
-               zz_file.zz_key2 = "batch" + STRING(inBatchNo)
-               zz_file.zz_char[1] = "mm-pp.p"
-               zz_file.zz_char[2] = inProcedure
-               zz_file.zz_char[3] = STRING(TODAY)
-               zz_file.zz_char[4] = STRING(TIME,"HH:MM:SS")
-               zz_file.zz_char[6] = "LIVE".
-    
-    END.
-    RELEASE zz_file.
+    OUTPUT TO VALUE(cLogLoc + "\" + "DeletedBatches-" + STRING(MONTH(TODAY)) 
+                                                + "-" + STRING(DAY(TODAY))
+                                                + "-" + STRING(YEAR(TODAY))
+                                                + ".csv") APPEND.
+                                                
+    EXPORT DELIMITER "," STRING(pBatchNo)
+                         "mm-pp.p"
+                         pProcedure
+                         STRING(TODAY)
+                         STRING(TIME,"HH:MM:SS")
+                         cDBase.
+    OUTPUT CLOSE.
 
 END PROCEDURE.
 
@@ -4967,66 +5041,62 @@ END PROCEDURE.
 
 
 PROCEDURE RemoveFiles:
-    DEFINE INPUT PARAMETER inFile  AS CHAR NO-UNDO.
+/*------------------------------------------------------------------------------
+ Purpose: Go through the folder and selete all the batches
+ 
+ INPUTS:  pFilePath -> File path to explore
+          pLvl      -> Number of levels deep to go(either 1 or 2)
+ 
+ Notes:
+------------------------------------------------------------------------------*/
+    DEFINE INPUT PARAMETER pFilePath  AS CHAR NO-UNDO.
+    DEFINE INPUT PARAMETER pLvl       AS INT  NO-UNDO.
 
-    DEFINE VARIABLE fname    AS CHAR   NO-UNDO.
-    DEFINE VARIABLE tmpfile  AS CHAR   NO-UNDO.
-    DEFINE VARIABLE tmpfile2 AS CHAR   NO-UNDO.
-    DEFINE VARIABLE topHand  AS HANDLE NO-UNDO.
-    DEFINE VARIABLE midHand  AS HANDLE NO-UNDO.
-    DEFINE VARIABLE lowHand  AS HANDLE NO-UNDO.
-    /*goes 3 levels deep to delete files...replacement for deleting entire top directory*/
+    DEFINE VARIABLE CurFileName       AS CHAR NO-UNDO.
+    DEFINE VARIABLE SubFileName       AS CHAR NO-UNDO.
+    DEFINE VARIABLE TmpPath           AS CHAR NO-UNDO.
 
-
-    IF inFile > "" THEN DO:
-        inFile = inFile + "\".
-        ASSIGN FILE-INFO:FILE-NAME = inFile.
-        IF FILE-INFO:FULL-PATHNAME <> ? THEN DO:
-            INPUT STREAM toplvl FROM OS-DIR(inFile).
-            topHand = STREAM toplvl:HANDLE.
-            IMPORT STREAM toplvl ^.
-            IMPORT STREAM toplvl ^.
+    /* Path doesn't exist, so return */
+    IF FILE-INFO:FULL-PATHNAME = ? THEN RETURN.
+    
+    RUN LogIt(5,"Procedure:RemoveFiles -> " + pFilePath).
+    INPUT STREAM S1 FROM OS-DIR(pFilePath).
+    REPEAT:
+        IMPORT STREAM S1 CurFileName.
+        IF LOOKUP(CurFileName,".,..") > 0 THEN NEXT.
+        
+        FILE-INFO:FILE-NAME = pFilePath + CurFileName.
+        
+        IF pLvl = 2 THEN DO:
+            TmpPath = FILE-INFO:FULL-PATHNAME + "\".
+            
+            INPUT STREAM S2 FROM OS-DIR(TmpPath).
             REPEAT:
-                IMPORT STREAM toplvl fname.
-                FILE-INFO:FILE-NAME = infile + fname.
-                IF INDEX(FILE-INFO:FILE-TYPE,"D") > 0 THEN DO:
-                    tmpfile = FILE-INFO:FULL-PATHNAME + "\".
-                    INPUT STREAM midlvl FROM OS-DIR(tmpfile).
-                    midHand = STREAM midlvl:HANDLE.
-                    IMPORT STREAM midlvl ^.
-                    IMPORT STREAM midlvl ^.
-                    REPEAT:
-                        IMPORT STREAM midlvl fname.
-                        FILE-INFO:FILE-NAME =  tmpfile + fname.
-                        IF INDEX(FILE-INFO:FILE-TYPE,"D") > 0 THEN DO:
-                            tmpfile2 = FILE-INFO:FULL-PATHNAME + "\".
-                            INPUT STREAM lowlvl FROM OS-DIR(tmpfile2).
-                            lowHand = STREAM lowlvl:HANDLE.
-                            IMPORT STREAM lowlvl ^.
-                            IMPORT STREAM lowlvl ^.
-                            REPEAT:
-                                IMPORT STREAM lowlvl fname.
-                                FILE-INFO:FILE-NAME =  tmpfile2 + fname.
-                                IF INDEX(FILE-INFO:FILE-TYPE,"F") > 0 AND INDEX(FILE-INFO:FILE-TYPE,"W") > 0 THEN DO:
-                                    OS-DELETE value(FILE-INFO:FULL-PATHNAME).
-                                END.
-                               
-                            END.
-                        END.
-                        ELSE IF INDEX(FILE-INFO:FILE-TYPE,"F") > 0 AND INDEX(FILE-INFO:FILE-TYPE,"W") > 0 THEN DO:
-                            OS-DELETE value(FILE-INFO:FULL-PATHNAME).
-                        END.
-                    END.
-                END.
-                ELSE IF INDEX(FILE-INFO:FILE-TYPE,"F") > 0 AND INDEX(FILE-INFO:FILE-TYPE,"W") > 0 THEN DO:
-                    OS-DELETE value(FILE-INFO:FULL-PATHNAME).
-                END.
+                IMPORT STREAM S2 SubFileName.
+                IF LOOKUP(SubFileName,".,..") > 0 THEN NEXT.
+                
+                FILE-INFO:FILE-NAME = TmpPath + SubFileName.
+                
+                /* Skip over deleting folders/directories */
+                IF INDEX(FILE-INFO:FILE-TYPE,"D") > 0 THEN NEXT.
+                
+                OS-DELETE VALUE(FILE-INFO:FULL-PATHNAME).
+                RUN LogIt(5,"Delete(" + STRING(OS-ERROR) + "): " + TmpPath + SubFileName).
             END.
         END.
+        ELSE DO:
+        
+            /* Skip over deleting folders/directories */
+            IF INDEX(FILE-INFO:FILE-TYPE,"D") > 0 THEN NEXT.
+            
+            OS-DELETE VALUE(FILE-INFO:FULL-PATHNAME).
+            RUN LogIt(5,"Delete(" + STRING(OS-ERROR) + "):" + pFilePath + CurFileName).    
+        END.
     END.
-    IF VALID-HANDLE(topHand) THEN INPUT STREAM topLvl CLOSE.
-    IF VALID-HANDLE(midHand) THEN INPUT STREAM midLvl CLOSE.
-    IF VALID-HANDLE(lowHand) THEN INPUT STREAM lowlvl CLOSE.
+    
+    INPUT STREAM S1 CLOSE.
+    INPUT STREAM S2 CLOSE.
+    
 END PROCEDURE.
 
 
@@ -5224,47 +5294,28 @@ PROCEDURE Resets:
 ------------------------------------------------------------------------------*/
     DEFINE INPUT PARAMETER pPurge      AS LOG  NO-UNDO.
 
-    DEFINE VARIABLE DelMe           AS LOG  NO-UNDO.
-    
-    DEFINE VARIABLE tmpcmd          AS CHAR NO-UNDO.
-    DEFINE VARIABLE tmpRunSeq       AS INT  NO-UNDO.
-    DEFINE VARIABLE templateCnt     AS INT  NO-UNDO.
-    DEFINE VARIABLE templateSaved   AS INT  NO-UNDO.
-    DEFINE VARIABLE tryCnt          AS INT  NO-UNDO.
-    DEFINE VARIABLE cLocation       AS CHAR NO-UNDO.
-    DEFINE VARIABLE BailOut         AS LOG  NO-UNDO.
-    DEFINE VARIABLE bailOut2        AS LOG  NO-UNDO.
-    DEFINE VARIABLE lineCnt         AS INT  NO-UNDO.
-    DEFINE VARIABLE tmpBedSeq       AS INT  NO-UNDO.
-    DEFINE VARIABLE cPathWay        AS CHAR NO-UNDO.
-    DEFINE VARIABLE fname           AS CHAR NO-UNDO.
-    DEFINE VARIABLE startbatch      AS INT  NO-UNDO.
-    DEFINE VARIABLE hasBleed        AS LOG  NO-UNDO.
-    DEFINE VARIABLE rFlag           AS LOG  NO-UNDO.
+    DEFINE VARIABLE DelBatch        AS LOG  NO-UNDO. 
+    DEFINE VARIABLE SaveFlag        AS LOG  NO-UNDO. /* Save Flag for batches */
     DEFINE VARIABLE qtyRan          AS INT  NO-UNDO.
     DEFINE VARIABLE qtyNeeded       AS INT  NO-UNDO.
     DEFINE VARIABLE inQueue         AS LOG  NO-UNDO.
-    DEFINE VARIABLE currDir         AS CHAR NO-UNDO.
 
-    EMPTY TEMP-TABLE ttart.
-    EMPTY TEMP-TABLE ttmat.
-    EMPTY TEMP-TABLE ttorder.
-    EMPTY TEMP-TABLE ttDel.
-    EMPTY TEMP-TABLE saves.
+
+    EMPTY TEMP-TABLE ttArt.
+    EMPTY TEMP-TABLE ttMat.
 
     /* Set DB & Folder Locations */
     RUN SetHomeFolder.
 
         
-    IF pPurge = TRUE THEN DO:
-        /*reset records so they delete*/
+    IF pPurge = TRUE THEN DO: /*reset records so they delete*/
         FOR EACH sign_mm_hdr WHERE sign_mm_hdr.RUN_date = ? BY sign_mm_hdr.runseq:
             IF sign_mm_hdr.qty_printed > 0 THEN 
-                ASSIGN sign_mm_hdr.SAVE_bed = YES. /*save beds in progress*/
+                ASSIGN sign_mm_hdr.SAVE_bed = YES. /* save beds in progress */
             ELSE IF sign_mm_hdr.reprint THEN
-                ASSIGN sign_mm_hdr.SAVE_bed = YES. /*save reprints*/
+                ASSIGN sign_mm_hdr.SAVE_bed = YES. /* save reprints */
             ELSE 
-                ASSIGN sign_mm_hdr.save_bed = NO.
+                ASSIGN sign_mm_hdr.save_bed = NO. /* reset all other batches */
             
             /* Default Corex batches to be deleted to maximize PC beds */    
             IF INDEX(sign_mm_hdr.matltype,"Corex") > 0 THEN sign_mm_hdr.save_bed = NO.
@@ -5272,8 +5323,8 @@ PROCEDURE Resets:
     END.
     ELSE DO:
         FOR EACH sign_mm_hdr WHERE sign_mm_hdr.RUN_date = ? BY sign_mm_hdr.runseq:
-            IF NOT sign_mm_hdr.matltype = "template" THEN DO:
-                rFlag = NO.
+            IF sign_mm_hdr.matltype <> "template" THEN DO:
+                SaveFlag = NO.
                 FOR EACH sign_mm_det OF sign_mm_hdr NO-LOCK BREAK BY sign_mm_det.itemseq:
                     IF LAST-OF(sign_mm_det.itemseq) THEN DO:
     
@@ -5283,149 +5334,56 @@ PROCEDURE Resets:
                             FIND so_file NO-LOCK WHERE so_file.so_no = so_items.so_no NO-ERROR.
                             /*have we ran all of them?*/
                             RUN getQty (so_items.itemseq, OUTPUT qtyRan, OUTPUT qtyNeeded, OUTPUT inQueue).
-                            IF qtyNeeded < 0 THEN rFlag = YES.
+                            IF qtyNeeded < 0 THEN SaveFlag = YES.
     
                             /*has it been marked complete?*/
-                            IF CAN-FIND(FIRST h_detail NO-LOCK WHERE h_detail.order_no = so_items.so_no AND h_detail.ITEM_no = STRING(so_items.ITEM_no) AND h_detail.activity = "D11" AND h_detail.zzLog_1 = YES) THEN DO:
-                               rFlag = YES.
-                            END.
+                            IF CAN-FIND(FIRST h_detail NO-LOCK WHERE h_detail.order_no = so_items.so_no 
+                                                                 AND h_detail.ITEM_no  = STRING(so_items.ITEM_no) 
+                                                                 AND h_detail.activity = "D11" 
+                                                                 AND h_detail.zzLog_1  = YES) THEN SaveFlag = YES.
 
-                            IF so_items.ord_status <> 5 THEN rFlag = YES.
+                            IF so_items.ord_status <> 5 THEN SaveFlag = YES.
 
-                            IF AVAIL(so_file) AND so_file.hold <> "" THEN rFlag = YES.
+                            IF AVAIL(so_file) AND so_file.hold <> "" THEN SaveFlag = YES.
                         END.
-                        ELSE rFlag = YES.
+                        ELSE SaveFlag = YES.
                     END.
                 END.
             END.
-            ELSE rFlag = YES.
+            ELSE SaveFlag = YES.
 
             /*keep full beds and reprints*/
-            IF (sign_mm_hdr.fullbed = YES AND rFlag = NO) OR (hasBleed AND rFlag = NO) OR sign_mm_hdr.reprint = YES THEN
-                ASSIGN sign_mm_hdr.save_bed = YES.
-            ELSE 
-                ASSIGN sign_mm_hdr.SAVE_bed = NO.
-                
+            IF (sign_mm_hdr.fullbed = YES AND SaveFlag = NO) 
+            OR sign_mm_hdr.reprint  = YES THEN sign_mm_hdr.save_bed = YES.
+            ELSE sign_mm_hdr.SAVE_bed = NO.
+            
+            /* Default Corex batches to be deleted to maximize PC beds */     
             IF INDEX(sign_mm_hdr.matltype,"Corex") > 0 THEN sign_mm_hdr.save_bed = NO.
         END.
-
-        IF AVAIL sign_mm_hdr THEN RELEASE sign_mm_hdr.
     END.
 
-    /*******************************/
-    /****Folder Maintenance*********/
-    /*******************************/
-    IF pPurge = YES THEN DO:
-        FILE-INFO:FILE-NAME = cHomeFolder.
-        /*remove all images inside the mtl1 folders*/
-        RUN removeFiles(cHomeFolder).
-    END.
+    
+    /* Check Batch & Image folder locations - clean up files as well */
+    RUN FolderMaintenance(pPurge).
     
  
-    /*Maintenance zz trigger records that didn't get deleted*/ 
-    FOR EACH zz_file WHERE zz_file.zz_key1 = "MM-SentToRip":
-        IF (TODAY - date(zz_file.zz_date[1]) > 2) OR (zz_file.zz_date[1] = ?) THEN DELETE zz_file.
-    END.
-
-     /*make sure CS6 folder is still there else make it*/
-    ASSIGN FILE-INFO:FILE-NAME = cBatchImgLoc.
-    IF FILE-INFO:FULL-PATHNAME = ? THEN OS-CREATE-DIR value(cBatchImgLoc).
-
-
-
-    /*make sure the Logs folder is there*/
-    ASSIGN FILE-INFO:FILE-NAME = cLogLoc.
-    IF FILE-INFO:FULL-PATHNAME = ? THEN OS-CREATE-DIR VALUE(cLogLoc).
-
-
-
-    /*every sunday housekeeping on CS6 folder*/
-    IF WEEKDAY(TODAY) = 1 THEN DO:
-        ASSIGN FILE-INFO:FILE-NAME = cBatchImgLoc.
-        IF FILE-INFO:FULL-PATHNAME <> ? THEN DO:
-            INPUT FROM OS-DIR(cBatchImgLoc).
-            IMPORT ^.
-            IMPORT ^.
-            REPEAT:
-                IMPORT fname.
-                FILE-INFO:FILE-NAME = cBatchImgLoc + "\" + fname.
-                IF fname = "CompletedBatches" THEN NEXT.
-                IF FILE-INFO:FILE-MOD-DATE < TODAY - 1 THEN
-                    OS-DELETE value(FILE-INFO:FULL-PATHNAME).
-            END.
-        END.
-    END.
-
-
-
-
-    /*clean up csv files we've recently created*/
-    IF WEEKDAY(TODAY) = 1 THEN DO:
-        FILE-INFO:FILE-NAME = cLogLoc.
-        IF FILE-INFO:FULL-PATHNAME <> ? THEN DO:
-            INPUT FROM OS-DIR(cLogLoc).
-            IMPORT ^.
-            IMPORT ^.
-            REPEAT:
-                IMPORT fname.
-                IF fname BEGINS "MmOrderReport" OR fname BEGINS "MediaManagerlost" THEN DO:
-                    OS-DELETE value(cLogLoc + "\" + fname).
-                END.
-            END.
-        END.
-    END.
-    
-    FOR EACH pt_hotfolder NO-LOCK:
-        ASSIGN CurrDir = cHomeFolder + "\" + entry((NUM-ENTRIES(pt_hotfolder.pathway,"\") - 1),pt_hotfolder.pathway,"\").
-        INPUT FROM OS-DIR(currDir).
-        IMPORT ^. /*gets rid of "."  */
-        IMPORT ^. /*gets rid of ".." */
-        REPEAT:
-            IMPORT fName.
-          
-            cpathway = currDir + "\" + fname + "\".
-            IF NOT CAN-FIND(FIRST hFolder WHERE hFolder.path = cpathway) THEN DO:
-                OS-DELETE VALUE(cpathway).
-            END.
-        END.
-    END.
-
-    /*now rebuild directories and subfolders*/
-    ASSIGN FILE-INFO:FILE-NAME = cHomeFolder.
-    IF FILE-INFO:FULL-PATHNAME = ? THEN OS-CREATE-DIR value(cHomeFolder).
-
-    FOR EACH zz_file WHERE zz_file.zz_key1 = "MM-Hotfolder-Order" BY zz_file.zz_dec[1]:
-        IF NOT CAN-DO(cPrintTypes,zz_file.zz_key2) THEN
-            ASSIGN cPrintTypes = cPrintTypes + (IF cPrintTypes = "" THEN "" ELSE ",") + zz_file.zz_key2.
-    END.
-    
-    FOR EACH pt_hotfolder NO-LOCK:
-        tmpcmd = cHomeFolder + "\" + entry((NUM-ENTRIES(pt_hotfolder.pathway,"\") - 1),pt_hotfolder.pathway,"\") + "\" + entry(NUM-ENTRIES(pt_hotfolder.pathway,"\"),pt_hotfolder.pathway,"\").
-        ASSIGN FILE-INFO:FILE-NAME = tmpcmd.
-        tmpcmd = "mkdir" + " " + chr(34) + tmpcmd + CHR(34).
-        IF FILE-INFO:FULL-PATHNAME = ? THEN OS-COMMAND SILENT VALUE(tmpcmd).
-    END.
-    /*******************************/
-    /****End Folder Maintenance*****/
-    /*******************************/
-
     /*Delete batches we are not keeping*/
     FOR EACH sign_mm_hdr WHERE sign_mM_hdr.RUN_date = ?:
-        ASSIGN Delme  = TRUE.
+        ASSIGN DelBatch = TRUE.
                
-        IF sign_mm_hdr.SAVE_bed = YES THEN delme = FALSE. 
-        IF CAN-FIND (FIRST sign_mm_det WHERE sign_mm_det.batchseq = sign_mm_hdr.batchseq AND sign_mm_det.itemseq = 0) THEN delme = TRUE.
-        IF delme = FALSE THEN NEXT.
+        IF sign_mm_hdr.SAVE_bed = YES THEN DelBatch = FALSE. 
+        IF CAN-FIND (FIRST sign_mm_det WHERE sign_mm_det.batchseq = sign_mm_hdr.batchseq 
+                                         AND sign_mm_det.itemseq  = 0) THEN DelBatch = TRUE.
+        IF DelBatch = FALSE THEN NEXT.
         
         FOR EACH sign_mm_det OF sign_mm_hdr:
             DELETE sign_mm_det.
         END.
         
-        RUN RecordHdrDelete(sign_mm_hdr.batchseq, "resets").
+        RUN RecordHdrDelete(sign_mm_hdr.batchseq, "Resets").
         DELETE sign_mm_hdr.
     END.
 
-    EMPTY TEMP-TABLE ttdel.
 END PROCEDURE.
 
 
@@ -5722,7 +5680,7 @@ PROCEDURE SetHomeFolder:
     
     ASSIGN cHomeFolder  = imageShare + "AgentPhotos\temporary\mtl1" + (IF cDBase <> "LIVE" THEN ("-" + cDBase) ELSE "")
            cRanFolder   = imageShare + "AgentPhotos\temporary\"     + (IF cDBase <> "LIVE" THEN ("-" + cDBase) ELSE "") + "\CompletedBatches"
-           cBatchImgLoc = imageShare + "AgentPhotos\temporary\CS6"  + (IF cDBase <> "LIVE" THEN ("-" + cDBase) ELSE "")
+           cBatchImgLoc = imageShare + "AgentPhotos\temporary\CS6"  + (IF cDBase <> "LIVE" THEN ("-" + cDBase) ELSE "").
                                            
 END PROCEDURE.
 
@@ -5764,7 +5722,6 @@ PROCEDURE TrimBeds:
 
     IF deleteNo = "" THEN DO:
         DO WHILE CAN-FIND(FIRST sign_mm_hdr WHERE sign_mm_hdr.qty_printed = 0 AND sign_mm_hdr.fullbed = FALSE):
-            EMPTY TEMP-TABLE ttDel.
             FOR EACH sign_mm_hdr WHERE sign_mm_hdr.qty_printed = 0 AND sign_mm_hdr.fullbed = FALSE:
                 RUN RuleOfOne(sign_mm_hdr.bedseq, sign_mm_hdr.batchseq, OUTPUT c_ok).
                 IF c_ok = YES THEN DO:

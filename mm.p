@@ -3,6 +3,7 @@ ROUTINE-LEVEL ON ERROR UNDO, THROW.
 DEFINE INPUT PARAMETER pPurge AS LOG    NO-UNDO.
 
 DEFINE VARIABLE hMM-PP        AS HANDLE NO-UNDO.
+DEFINE VARIABLE hTable        AS HANDLE NO-UNDO.
 DEFINE VARIABLE CanRun        AS LOG    NO-UNDO.
 DEFINE VARIABLE IsProdReady   AS LOG    NO-UNDO.
 DEFINE VARIABLE WorkDate      AS DATE   NO-UNDO.
@@ -94,15 +95,13 @@ ELSE DO:
     RUN CanIRun IN hMM-PP ("Close",OUTPUT CanRun).
     RUN LogIt   IN hMM-PP (1,"CanIRun: " + STRING(CanRun)).
     
-    /*RUN LogIt   IN hMM-PP (1,"Log ttArt").
-    FOR EACH ttArt:
+    RUN ExportRptDet IN hMM-PP.
+    
+    FOR EACH ttArt NO-LOCK:
         hTable = BUFFER ttArt:HANDLE.
         RUN LogTT IN hMM-PP (2,hTable).
-    END.*/
+    END.
 
-    /*RUN ExportRptDet      IN hMM-PP.*/
-
-     /****************** End Main *******************/
  END.
                                                                           
 IF VALID-HANDLE(hMM-PP) THEN DELETE PROCEDURE hMM-PP.         

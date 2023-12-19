@@ -1076,7 +1076,7 @@ PROCEDURE Checks:
             RETURN.
     END.
     
-    oProdReady = YES.
+    oProdReady = TRUE.
 
 END PROCEDURE.
 
@@ -4034,6 +4034,189 @@ PROCEDURE GroupingCorex:
 END PROCEDURE.
 
 
+PROCEDURE LogIt:
+/*------------------------------------------------------------------------------
+ Purpose: Log input message out to correct log file
+ 
+ INPUTS: pSource: Identifier used to determine which log file location       
+         pMsg:    Message that is needing logged
+ 
+ Notes:
+------------------------------------------------------------------------------*/
+    DEFINE INPUT PARAMETER pSource    AS INT  NO-UNDO.
+    DEFINE INPUT PARAMETER pMsg       AS CHAR NO-UNDO.
+    
+    DEFINE VARIABLE tmpUser           AS CHAR NO-UNDO.
+    DEFINE VARIABLE tmpFile           AS CHAR NO-UNDO.
+
+    tmpUser = IF current-user-id <> "" THEN current-user-id ELSE OS-GETENV("computername"). 
+    
+    RUN GetDBase.
+    
+    CASE pSource:
+        WHEN 1 THEN tmpFile = "\jmMM-"      + cDBase + "-". /* mm.p log */
+        WHEN 2 THEN tmpFile = "\jmSpeed-"   + cDBase + "-". /* Procedure speeds log */
+        WHEN 3 THEN tmpFile = "\jmReprint-" + cDBase + "-". /* mmReprint.w log */
+        WHEN 4 THEN tmpFile = "\jmDynam-"   + cDBase + "-". /* Dynamic Nest Batching log */
+        WHEN 5 THEN tmpFile = "\jmDetails-" + cDBase + "-". /* Procedure Details log */
+        WHEN 6 THEN tmpFile = "\CorexOnly-" + cDBase + "-". /* Prime Center log */
+    END CASE.
+    
+    IF tmpFile <> "" THEN DO:
+        OUTPUT TO VALUE(cLogLoc + tmpFile + STRING(MONTH(TODAY)) + "-" + STRING(YEAR(TODAY)) + ".log") APPEND.
+        PUT UNFORMATTED STRING(TODAY) " " STRING(TIME,"HH:MM:SS") " " pMsg SKIP.
+        OUTPUT CLOSE.
+    END.
+    
+    /* This logs everything */
+    OUTPUT TO VALUE(cLogLoc + "\jmFull-" + cDBase + "-" + STRING(MONTH(TODAY)) + "-" + STRING(YEAR(TODAY)) + ".log") APPEND.
+    PUT UNFORMATTED STRING(TODAY) " " STRING(TIME,"HH:MM:SS") " " pMsg SKIP.
+    OUTPUT CLOSE.
+    
+
+END PROCEDURE.
+
+
+PROCEDURE LogTT:
+/*------------------------------------------------------------------------------
+ Purpose: Log input temp table item
+ 
+ INPUTS: pSource -> Indicates what log file to use
+         phTable -> Temp table to log
+ 
+ Notes:
+------------------------------------------------------------------------------*/
+    DEFINE INPUT PARAMETER pSource      AS INT       NO-UNDO.
+    DEFINE INPUT PARAMETER phTable      AS HANDLE    NO-UNDO.
+    
+    DEFINE VARIABLE        TmpFile      AS CHAR      NO-UNDO.
+    DEFINE VARIABLE        CurDate      AS CHAR      NO-UNDO.
+    DEFINE VARIABLE        ValueList    AS CHAR      NO-UNDO.
+    DEFINE VARIABLE        HdrList      AS CHAR      NO-UNDO. 
+    
+    RUN getDBase.
+    
+    CurDate = STRING(MONTH(TODAY)) + "-" + STRING(DAY(TODAY)) + "-" + STRING(YEAR(TODAY)) + ".md".
+    
+    CASE pSource:
+        WHEN 1 THEN TmpFile = "jmRptDet-" + cDBase + "-" + CurDate.
+        WHEN 2 THEN TmpFile = "jmTTArt-"  + cDBase + "-" + CurDate.
+    END CASE.
+    
+    IF TmpFile = "" THEN RETURN.
+    ELSE TmpFile = cLogLoc + TmpFile.
+    
+    DO iLoop = 1 TO phTable:NUM-FIELDS:
+        ASSIGN HdrList   = IF HdrList = "" THEN phTable:BUFFER-FIELD(iLoop):NAME 
+                                           ELSE HdrList + "|" + phTable:BUFFER-FIELD(iLoop):NAME
+               ValueList = IF ValueList = "" THEN STRING(phTable:BUFFER-FIELD(iLoop):BUFFER-VALUE) 
+                                             ELSE ValueList + "|" + STRING(phTable:BUFFER-FIELD(iLoop):BUFFER-VALUE).  
+    END.
+    
+    /* Check if we need to create the file first */
+    IF SEARCH(TmpFile) = ? THEN DO:
+        OUTPUT STREAM S1 TO VALUE(TmpFile) APPEND.
+        EXPORT STREAM S1 HdrList SKIP.
+        OUTPUT STREAM S1 CLOSE.    
+    END.
+    ELSE DO:
+        OUTPUT STREAM S1 TO VALUE(TmpFile) APPEND.
+        EXPORT STREAM S1 ValueList SKIP.
+        OUTPUT STREAM S1 CLOSE.
+    END.
+    
+    DELETE OBJECT phTable NO-ERROR.
+END PROCEDURE.
+
+
+PROCEDURE LogTTFull:
+/*------------------------------------------------------------------------------
+ Purpose: Log all items from a temp-table
+ 
+ INPUTS: pSource -> Indicator for what log file to use
+         pTable  -> Temp table to log
+ 
+ Notes:
+------------------------------------------------------------------------------*/
+    DEFINE INPUT PARAMETER pSource AS INT          NO-UNDO.
+    DEFINE INPUT PARAMETER phTable AS HANDLE       NO-UNDO.
+    
+    DEFINE VARIABLE hQuery  AS HANDLE NO-UNDO. /* Query handle     */
+    DEFINE VARIABLE hBuffer AS HANDLE NO-UNDO. /* Buffer Handle    */
+    DEFINE VARIABLE hField  AS HANDLE NO-UNDO. /* Field Handle     */
+    DEFINE VARIABLE TmpFile AS CHAR   NO-UNDO. /* Output File Name */
+    DEFINE VARIABLE CurDate AS CHAR   NO-UNDO. /* Today's Date     */
+    DEFINE VARIABLE TmpCnt  AS INT    NO-UNDO.
+    DEFINE VARIABLE LogMsg  AS CHAR   NO-UNDO.
+    
+    CurDate = STRING(MONTH(TODAY)) + "-" + STRING(DAY(TODAY)) + "-" + STRING(YEAR(TODAY)) + ".md".
+    
+    CASE pSource:
+        WHEN 1 THEN TmpFile = "\jmRptDetFull-" + CurDate.
+        WHEN 2 THEN TmpFile = "\jmTTArtFull-"  + CurDate.
+    END CASE.
+    ASSIGN TmpFile = cLogLoc + TmpFile
+           TmpCnt  = 0.
+    
+    OUTPUT TO VALUE(TmpFile) APPEND.
+    
+    hBuffer = phTable:DEFAULT-BUFFER-HANDLE.
+    
+    CREATE QUERY hQuery.
+    hQuery:SET-BUFFERS(hBuffer).
+    hQuery:QUERY-PREPARE("for each " + phTable:NAME).
+    hQuery:QUERY-OPEN.
+    REPEAT:
+        hQuery:GET-NEXT.
+        IF hQuery:QUERY-OFF-END THEN LEAVE.
+        TmpCnt = TmpCnt + 1.
+        
+        /* Get Table Headers */
+        IF TmpCnt = 1 THEN DO:
+            REPEAT iLoop = 1 TO hBuffer:NUM-FIELDS:
+                ASSIGN hField = hBuffer:BUFFER-FIELD(iLoop)
+                       LogMsg = LogMsg + hField:NAME + "|".
+            END.
+            LogMsg = RIGHT-TRIM(LogMsg, "|").
+            PUT UNFORMATTED LogMsg SKIP.
+            LogMsg = "".
+            
+            REPEAT iLoop = 1 TO hBuffer:NUM-FIELDS:
+                ASSIGN hField = hBuffer:BUFFER-FIELD(iLoop)
+                       LogMsg = LogMsg + "---|".
+            END.
+            LogMsg = RIGHT-TRIM(LogMsg,"|").
+            PUT UNFORMATTED LogMsg SKIP.
+            LogMsg = "".        
+            
+        END. 
+        
+        REPEAT iLoop = 1 TO hBuffer:NUM-FIELDS:
+            ASSIGN hField = hBuffer:BUFFER-FIELD(iLoop)
+                   LogMsg = LogMsg + (IF hField:BUFFER-VALUE = ? THEN "?"
+                                                                 ELSE STRING(hField:BUFFER-VALUE)) + "|".
+        END.
+        LogMsg = RIGHT-TRIM(LogMsg,"|").
+        PUT UNFORMATTED LogMsg SKIP.   
+        
+    END.
+    
+    LogMsg = "~n~n"
+           + ISO-DATE(NOW) + ":"
+           + " Table Name: **" + phTable:NAME + "**"
+           + " Record Count: **" + STRING(TmpCnt) + "**~n~n".
+    
+    PUT UNFORMATTED LogMsg.
+    OUTPUT CLOSE.
+    
+    DELETE OBJECT hBuffer NO-ERROR.
+    DELETE OBJECT hField  NO-ERROR.
+    DELETE OBJECT hQuery  NO-ERROR.
+    DELETE OBJECT phTable NO-ERROR.
+     
+END PROCEDURE.
+
+
 PROCEDURE ReadXML:
     DEFINE INPUT PARAMETER FileList AS "System.Collections.Generic.List<character>" NO-UNDO. 
     
@@ -4390,49 +4573,6 @@ PROCEDURE ImageDiff:
         END.
     END.
 END.
-
-
-PROCEDURE LogIt:
-/*------------------------------------------------------------------------------
- Purpose: Log input message out to correct log file
- 
- INPUTS: pSource: Identifier used to determine which log file location       
-         pMsg:    Message that is needing logged
- 
- Notes:
-------------------------------------------------------------------------------*/
-    DEFINE INPUT PARAMETER pSource    AS INT  NO-UNDO.
-    DEFINE INPUT PARAMETER pMsg       AS CHAR NO-UNDO.
-    
-    DEFINE VARIABLE tmpUser           AS CHAR NO-UNDO.
-    DEFINE VARIABLE tmpFile           AS CHAR NO-UNDO.
-
-    tmpUser = IF current-user-id <> "" THEN current-user-id ELSE OS-GETENV("computername"). 
-    
-    RUN GetDBase.
-    
-    CASE pSource:
-        WHEN 1 THEN tmpFile = "\jmMM-"      + cDBase + "-". /* mm.p log */
-        WHEN 2 THEN tmpFile = "\jmSpeed-"   + cDBase + "-". /* Procedure speeds log */
-        WHEN 3 THEN tmpFile = "\jmReprint-" + cDBase + "-". /* mmReprint.w log */
-        WHEN 4 THEN tmpFile = "\jmDynam-"   + cDBase + "-". /* Dynamic Nest Batching log */
-        WHEN 5 THEN tmpFile = "\jmDetails-" + cDBase + "-". /* Procedure Details log */
-        WHEN 6 THEN tmpFile = "\CorexOnly-" + cDBase + "-". /* Prime Center log */
-    END CASE.
-    
-    IF tmpFile <> "" THEN DO:
-        OUTPUT TO VALUE(cLogLoc + tmpFile + STRING(MONTH(TODAY)) + "-" + STRING(YEAR(TODAY)) + ".log") APPEND.
-        PUT UNFORMATTED STRING(TODAY) " " STRING(TIME,"HH:MM:SS") " " pMsg SKIP.
-        OUTPUT CLOSE.
-    END.
-    
-    /* This logs everything */
-    OUTPUT TO VALUE(cLogLoc + "\jmFull-" + cDBase + "-" + STRING(MONTH(TODAY)) + "-" + STRING(YEAR(TODAY)) + ".log") APPEND.
-    PUT UNFORMATTED STRING(TODAY) " " STRING(TIME,"HH:MM:SS") " " pMsg SKIP.
-    OUTPUT CLOSE.
-    
-
-END PROCEDURE.
 
 
 PROCEDURE PrintOrder:
@@ -6035,9 +6175,19 @@ END PROCEDURE.
 
 
 PROCEDURE ExportRptDet:
-    OUTPUT TO VALUE(SESSION:TEMP-DIR + "rpt_det.d").
-    FOR EACH ttRpt_Det: EXPORT ttRpt_Det. END.
-    OUTPUT CLOSE.
+/*------------------------------------------------------------------------------
+ Purpose: Get Handle for ttRpt_det & log to file
+ 
+ INPUTS: 
+ 
+ Notes:
+------------------------------------------------------------------------------*/
+    DEFINE VARIABLE hTable AS HANDLE NO-UNDO.
+    
+    hTable = TEMP-TABLE ttRpt_det:HANDLE.
+    RUN LogTTFull (1,hTable).
+    DELETE OBJECT hTable NO-ERROR.
+    
 END PROCEDURE.
 
 

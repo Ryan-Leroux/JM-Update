@@ -206,229 +206,214 @@ END PROCEDURE.
 
 
 PROCEDURE BuildTT:
-    DEFINE INPUT PARAMETER cSo      AS CHAR  NO-UNDO.
-    DEFINE INPUT PARAMETER cItem    AS INT   NO-UNDO.
+/*------------------------------------------------------------------------------
+ Purpose: Build the ttArt records for each SO item 
+ 
+ INPUTS:  pPath    -> File path to explore
+          pMatches -> Value to see if file path matches  
+ 
+ Notes:
+------------------------------------------------------------------------------*/
+    DEFINE INPUT PARAMETER pSo      AS CHAR  NO-UNDO.
+    DEFINE INPUT PARAMETER pItem    AS INT   NO-UNDO.
 
-    DEFINE VARIABLE cType           AS CHAR  NO-UNDO.
-    DEFINE VARIABLE cTemplate       AS INT   NO-UNDO.
-    DEFINE VARIABLE cPointer        AS INT   NO-UNDO.
-    DEFINE VARIABLE cSwitch         AS LOG   NO-UNDO.
-    DEFINE VARIABLE backout         AS LOG   NO-UNDO.
-    DEFINE VARIABLE isReflect       AS LOG   NO-UNDO.
-    DEFINE VARIABLE reflectInv      AS CHAR  NO-UNDO INITIAL "LBZCO0624RF,LBZCO0624RF-CG".
-    DEFINE VARIABLE reflectBom      AS CHAR  NO-UNDO INITIAL "LMV18-8100,LMV24-8100,LMV24-2100-10,LMV24-7930,LMV24-7930-NL,LMV24-7310-NL,LMV30-8100".
-    DEFINE VARIABLE cHeight         AS DEC   NO-UNDO.
-    DEFINE VARIABLE cWidth          AS DEC   NO-UNDO.
-    DEFINE VARIABLE tmpint          AS INT   NO-UNDO.
-    DEFINE VARIABLE totint          AS INT   NO-UNDO.
-    DEFINE VARIABLE colorOk         AS LOG   NO-UNDO.
-    DEFINE VARIABLE cMaterial       AS CHAR  NO-UNDO.
-    DEFINE VARIABLE invPartNo       AS CHAR  NO-UNDO.
-    DEFINE VARIABLE lastTTart       AS RECID NO-UNDO.
-    DEFINE VARIABLE matRecid        AS RECID NO-UNDO.
-    DEFINE VARIABLE cICseq          AS INT   NO-UNDO.
-    DEFINE VARIABLE hasBleed        AS LOG   NO-UNDO.
-    DEFINE VARIABLE qtyRan          AS INT   NO-UNDO.
-    DEFINE VARIABLE qtyNeeded       AS INT   NO-UNDO.
-    DEFINE VARIABLE inQueue         AS LOG   NO-UNDO.
-    DEFINE VARIABLE blah            AS CHAR  NO-UNDO.
-    DEFINE VARIABLE squptrec        AS RECID NO-UNDO.
-    DEFINE VARIABLE hotfolderin     AS INT   NO-UNDO.
-    DEFINE VARIABLE hotfolderout    AS INT   NO-UNDO.
-    DEFINE VARIABLE isPrecut        AS LOG   NO-UNDO INITIAL FALSE.
-    
-    DEFINE VARIABLE IsDynamicNestCompatable AS LOGICAL NO-UNDO.
+    DEFINE VARIABLE SubstrateType   AS CHAR  NO-UNDO. /* Substrate Type */
+    DEFINE VARIABLE TemplateNo      AS INT   NO-UNDO. /* Art's Template # */
+    DEFINE VARIABLE IsSwitch        AS LOG   NO-UNDO. /* Do we need to switch the art? */
+    DEFINE VARIABLE IsReflect       AS LOG   NO-UNDO.
+    DEFINE VARIABLE ReflectInv      AS CHAR  NO-UNDO INITIAL "LBZCO0624RF,LBZCO0624RF-CG".
+    DEFINE VARIABLE ReflectBom      AS CHAR  NO-UNDO INITIAL "LMV18-8100,LMV24-8100,LMV24-2100-10,LMV24-7930,LMV24-7930-NL,LMV24-7310-NL,LMV30-8100".
+    DEFINE VARIABLE CurHeight       AS DEC   NO-UNDO.
+    DEFINE VARIABLE CurWidth        AS DEC   NO-UNDO.
+    DEFINE VARIABLE CurMaterial     AS CHAR  NO-UNDO.
+    DEFINE VARIABLE InvPartNo       AS CHAR  NO-UNDO.
+    DEFINE VARIABLE MatRecid        AS RECID NO-UNDO. /* Need to change to ROWID */
+    DEFINE VARIABLE InterCompSeq    AS INT   NO-UNDO. /* Inter Company Seq */
+    DEFINE VARIABLE QtyRan          AS INT   NO-UNDO.
+    DEFINE VARIABLE QtyNeeded       AS INT   NO-UNDO.
+    DEFINE VARIABLE InQueue         AS LOG   NO-UNDO.
+    DEFINE VARIABLE CurHotFolder    AS CHAR  NO-UNDO. /* Current Hotfolder */
+    DEFINE VARIABLE SquptRID        AS ROWID NO-UNDO. /* RowID for Squ_ptdet table */
+    DEFINE VARIABLE CurHotFolderSeq AS INT   NO-UNDO.
+    DEFINE VARIABLE NewHotFolderSeq AS INT   NO-UNDO.
+    DEFINE VARIABLE IsPrecut        AS LOG   NO-UNDO INITIAL FALSE.
+    DEFINE VARIABLE IsDynamNestComp AS LOGICAL NO-UNDO.
 
-    
-    ASSIGN isReflect = NO colorOK = FALSE hasBleed = NO.
-    FIND so_items NO-LOCK WHERE so_items.so_no = cSo AND so_items.ITEM_no = cITem NO-ERROR.
-    FIND so_file NO-LOCK WHERE so_file.so_no = cSo NO-ERROR.
+               
+    FIND so_items NO-LOCK WHERE so_items.so_no = pSo AND so_items.ITEM_no = pItem NO-ERROR.
+    FIND so_file NO-LOCK WHERE so_file.so_no = pSo NO-ERROR.
     IF NOT AVAIL so_items OR NOT AVAIL so_file THEN NEXT.
 
     FIND pt_det NO-LOCK WHERE pt_det.part_no = so_items.part_no NO-ERROR.
     FIND FIRST squ_plan NO-LOCK WHERE squ_plan.itemseq = so_items.itemseq NO-ERROR.
-    squptrec = ?.
+    
+    SquptRID = ?.
     IF AVAIL pt_det THEN DO:
         FIND FIRST squ_ptdet NO-LOCK WHERE squ_ptdet.itemseq = so_items.itemseq AND squ_ptdet.TYPE <> "Frame" NO-ERROR.
         IF AVAIL squ_ptdet THEN DO:
-            ASSIGN squptrec = RECID(squ_ptdet).
+            ASSIGN SquptRID = ROWID(squ_ptdet).
             IF NOT squ_ptdet.digitalDF  AND NOT squ_ptdet.digitalSF THEN DO:
-                RUN ReportIssues(so_items.itemseq,"MM-Missing Sides",so_items.so_no,STRING(so_items.ITEM_no),"","","","","","").
+                RUN ReportIssues(so_items.itemseq,"MM-Missing Sides","").
+                RETURN.
             END.
-            RUN FindMatPanel.p (squ_ptdet.subseq,OUTPUT matRecid).
-            FIND squ_mat NO-LOCK WHERE RECID(squ_mat) = matRecid NO-ERROR. 
+            
+            RUN FindMatPanel.p (squ_ptdet.subseq,OUTPUT MatRecid).
+            FIND squ_mat NO-LOCK WHERE RECID(squ_mat) = MatRecid NO-ERROR. 
 
             IF NOT AVAIL squ_mat AND AVAIL squ_plan THEN DO:
-                RUN findIcNo(so_items.itemseq,so_items.so_no,so_items.ITEM_No,STRING(squ_plan.ic_no),so_items.part_no,"no",OUTPUT cICseq).
-                FIND FIRST b_ptdet NO-LOCK WHERE b_ptdet.itemseq = cICseq AND b_ptdet.TYPE <> "Frame" NO-ERROR.
+                RUN findIcNo(so_items.itemseq,so_items.so_no,so_items.ITEM_No,STRING(squ_plan.ic_no),so_items.part_no,"FALSE",OUTPUT InterCompSeq).
+                FIND FIRST b_ptdet NO-LOCK WHERE b_ptdet.itemseq = InterCompSeq AND b_ptdet.TYPE <> "Frame" NO-ERROR.
                 IF AVAIL b_ptdet THEN DO:
-                    RUN FindMatPanel.p (b_ptdet.subseq,OUTPUT matRecid).
-                    FIND FIRST squ_mat NO-LOCK WHERE RECID(squ_mat) = matRecid NO-ERROR. 
+                    RUN FindMatPanel.p (b_ptdet.subseq,OUTPUT MatRecid).
+                    FIND FIRST squ_mat NO-LOCK WHERE RECID(squ_mat) = MatRecid NO-ERROR. 
                 END.
+                
                 IF NOT AVAIL squ_mat THEN DO:
-                    RUN findIcNo(so_items.itemseq,so_items.so_no,so_items.ITEM_No,STRING(squ_plan.ic_no),so_items.part_no,"YES",OUTPUT cICseq).
-                    FIND FIRST b_ptdet NO-LOCK WHERE b_ptdet.itemseq = cICseq AND b_ptdet.TYPE <> "Frame" NO-ERROR.
+                    RUN findIcNo(so_items.itemseq,so_items.so_no,so_items.ITEM_No,STRING(squ_plan.ic_no),so_items.part_no,"TRUE",OUTPUT InterCompSeq).
+                    FIND FIRST b_ptdet NO-LOCK WHERE b_ptdet.itemseq = InterCompSeq AND b_ptdet.TYPE <> "Frame" NO-ERROR.
                     IF AVAIL b_ptdet THEN DO:
-                        RUN FindMatPanel.p (b_ptdet.subseq,OUTPUT matRecid).
-                        FIND FIRST squ_mat NO-LOCK WHERE RECID(squ_mat) = matRecid NO-ERROR. 
+                        RUN FindMatPanel.p (b_ptdet.subseq,OUTPUT MatRecid).
+                        FIND FIRST squ_mat NO-LOCK WHERE RECID(squ_mat) = MatRecid NO-ERROR. 
                     END.
                 END.
+                
                 IF NOT AVAIL squ_mat THEN DO:
-                    RUN findIcNo(so_items.itemseq,so_items.so_no,so_items.ITEM_No,STRING(squ_plan.ic_no),so_items.part_no,"Guess",OUTPUT cICseq).
-                    FIND FIRST b_ptdet NO-LOCK WHERE b_ptdet.itemseq = cICseq AND b_ptdet.TYPE <> "Frame" NO-ERROR.
+                    RUN findIcNo(so_items.itemseq,so_items.so_no,so_items.ITEM_No,STRING(squ_plan.ic_no),so_items.part_no,"Guess",OUTPUT InterCompSeq).
+                    FIND FIRST b_ptdet NO-LOCK WHERE b_ptdet.itemseq = InterCompSeq AND b_ptdet.TYPE <> "Frame" NO-ERROR.
                     IF AVAIL b_ptdet THEN DO:
-                        RUN FindMatPanel.p (b_ptdet.subseq,OUTPUT matRecid).
-                        FIND FIRST squ_mat NO-LOCK WHERE RECID(squ_mat) = matRecid NO-ERROR. 
+                        RUN FindMatPanel.p (b_ptdet.subseq,OUTPUT MatRecid).
+                        FIND FIRST squ_mat NO-LOCK WHERE RECID(squ_mat) = MatRecid NO-ERROR. 
                     END.
                 END.
+                
             END.
         END.
         ELSE DO:
-            RUN findIcNo(so_items.itemseq,so_items.so_no,so_items.ITEM_No,STRING(squ_plan.ic_no),so_items.part_no,NO,OUTPUT cICseq).
-            FIND FIRST b_ptdet NO-LOCK WHERE b_ptdet.itemseq = cICseq AND b_ptdet.TYPE <> "Frame" NO-ERROR.
+            RUN findIcNo(so_items.itemseq,so_items.so_no,so_items.ITEM_No,STRING(squ_plan.ic_no),so_items.part_no,FALSE,OUTPUT InterCompSeq).
+            FIND FIRST b_ptdet NO-LOCK WHERE b_ptdet.itemseq = InterCompSeq AND b_ptdet.TYPE <> "Frame" NO-ERROR.
             IF AVAIL b_ptdet THEN DO:
-                RUN FindMatPanel.p (b_ptdet.subseq,OUTPUT matRecid).
-                FIND FIRST squ_mat NO-LOCK WHERE RECID(squ_mat) = matRecid NO-ERROR. 
+                RUN FindMatPanel.p (b_ptdet.subseq,OUTPUT MatRecid).
+                FIND FIRST squ_mat NO-LOCK WHERE RECID(squ_mat) = MatRecid NO-ERROR. 
             END.
+            
             IF NOT AVAIL squ_mat THEN DO:
-                RUN findIcNo(so_items.itemseq,so_items.so_no,so_items.ITEM_No,STRING(squ_plan.ic_no),so_items.part_no,YES,OUTPUT cICseq).
-                FIND FIRST b_ptdet NO-LOCK WHERE b_ptdet.itemseq = cICseq AND b_ptdet.TYPE <> "Frame" NO-ERROR.
+                RUN findIcNo(so_items.itemseq,so_items.so_no,so_items.ITEM_No,STRING(squ_plan.ic_no),so_items.part_no,TRUE,OUTPUT InterCompSeq).
+                FIND FIRST b_ptdet NO-LOCK WHERE b_ptdet.itemseq = InterCompSeq AND b_ptdet.TYPE <> "Frame" NO-ERROR.
                 IF AVAIL b_ptdet THEN DO:
-                    RUN FindMatPanel.p (b_ptdet.subseq,OUTPUT matRecid).
-                    FIND FIRST squ_mat NO-LOCK WHERE RECID(squ_mat) = matRecid NO-ERROR. 
+                    RUN FindMatPanel.p (b_ptdet.subseq,OUTPUT MatRecid).
+                    FIND FIRST squ_mat NO-LOCK WHERE RECID(squ_mat) = MatRecid NO-ERROR. 
                 END.
             END.
+            
         END. /*end else do*/
 
-        cMaterial = "". InvPartNo = "". cType = "".
-        IF NOT AVAIL squ_mat THEN FIND squ_mat NO-LOCK WHERE RECID(squ_mat) = matRecid NO-ERROR.
+        ASSIGN CurMaterial   = ""
+               InvPartNo     = ""
+               SubstrateType = "".
+        IF NOT AVAIL squ_mat THEN FIND squ_mat NO-LOCK WHERE RECID(squ_mat) = MatRecid NO-ERROR.
         IF AVAIL squ_mat THEN DO:
-            IF NOT AVAIL squ_ptdet THEN
-                FIND squ_ptdet NO-LOCK WHERE squ_ptdet.subseq = squ_mat.subseq NO-ERROR.
+            IF NOT AVAIL squ_ptdet THEN FIND squ_ptdet NO-LOCK WHERE squ_ptdet.subseq = squ_mat.subseq NO-ERROR.
 
-            IF squptrec <> ? THEN FIND squ_ptdet NO-LOCK WHERE RECID(squ_ptdet) = squptrec.
+            IF SquptRID <> ? THEN FIND squ_ptdet NO-LOCK WHERE ROWID(squ_ptdet) = SquptRID.
 
-            RUN getSubstrate.p ("",so_items.itemseq,OUTPUT cType,OUTPUT cMaterial).
+            RUN getSubstrate.p ("",so_items.itemseq,OUTPUT SubstrateType,OUTPUT CurMaterial).
  
-            
-            IF cType = "" OR cMaterial = "" THEN DO:
-                RUN reportIssues(so_items.itemseq,"MM-No Substrate on File",so_items.so_no,STRING(so_items.ITEM_no),"","","","","","").
-/*                     LEAVE. */
+            IF SubstrateType = "" OR CurMaterial = "" THEN DO:
+                RUN ReportIssues(so_items.itemseq,"MM-No Substrate on File","").
+                RETURN.
             END.
 
             /*figure out sign height and width*/
-            ASSIGN cTemplate = 0 
-                    cPointer = 0 
-                     cSwitch = NO 
-                     cHeight = 0 
-                      cWidth = 0.
-            IF cType <> "Corex" THEN DO:
-                   ASSIGN cHeight   = IF pt_det.pressprintingheight = 0 THEN squ_ptdet.pressprintingheight ELSE pt_det.pressprintingheight
-                          cWidth    = IF pt_det.pressprintingwidth = 0  THEN squ_ptdet.pressprintingwidth  ELSE pt_det.pressprintingwidth.
+            ASSIGN TemplateNo = 0 
+                   IsSwitch   = FALSE
+                   CurHeight  = 0 
+                   CurWidth   = 0.
+            IF SubstrateType <> "Corex" THEN DO:
+                   ASSIGN CurHeight   = IF pt_det.pressprintingheight = 0 THEN squ_ptdet.pressprintingheight ELSE pt_det.pressprintingheight
+                          CurWidth    = IF pt_det.pressprintingwidth = 0  THEN squ_ptdet.pressprintingwidth  ELSE pt_det.pressprintingwidth.
                                         
                     /*TS Fix*/
                     IF so_file.cust_no = "217559" THEN DO:
-                        IF AVAIL squ_ptdet THEN ASSIGN cHeight = squ_ptdet.pressprintingheight
-                                                       cWidth  = squ_ptdet.pressprintingwidth. 
+                        IF AVAIL squ_ptdet THEN ASSIGN CurHeight = squ_ptdet.pressprintingheight
+                                                       CurWidth  = squ_ptdet.pressprintingwidth. 
                                                           
                     END.
                     
                     
-                    IF cHeight = 0 OR cWidth = 0 THEN ASSIGN cHeight = pt_det.pt_Height
-                                                              cWidth = pt_det.pt_Width.
+                    IF CurHeight = 0 OR CurWidth = 0 THEN ASSIGN CurHeight = pt_det.pt_Height
+                                                                 CurWidth  = pt_det.pt_Width.
                                
             END.
             ELSE DO:
-                IF CAN-DO(cMiscParts,so_items.part_no) THEN DO:
-                    /*squ_quoterrequest*/
-                    ASSIGN cHeight = squ_ptdet.pt_Height
-                           cWidth  = squ_ptdet.pt_Width.
-                END.
+                IF LOOKUP(so_items.part_no,cMiscParts) > 0 THEN ASSIGN CurHeight = squ_ptdet.pt_Height
+                                                                       CurWidth  = squ_ptdet.pt_Width.
                 ELSE DO:
-                    /*if vert flute then flip height and width to get correct signs size to get correct template*/
-                    IF squ_ptdet.VERT_flutes = NO AND squ_ptdet.horz_flutes = NO THEN DO:
-                        IF pt_det.VERT_flutes = NO AND pt_det.horz_flutes = NO THEN DO:
-                            RUN reportIssues(so_items.itemseq,"MM-No Flute Direction",so_items.so_no,STRING(so_items.ITEM_no),cType + string(pt_det.pressprintingheight) + "x" + string(pt_det.pressprintingwidth),"","","","","").
-                        END.
-                        IF pt_det.VERT_flute THEN DO:
-                            ASSIGN cHeight = squ_ptdet.pressprintingwidth
-                                   cWidth  = squ_ptdet.pressprintingheight.
-                        END.
-                        ELSE DO:
-                            ASSIGN cHeight = squ_ptdet.PressPrintingHeight
-                                   cWidth  = squ_ptdet.pressprintingwidth.
-                        END.
+                    /* Vert Flute = flip height and width to get correct signs size to get correct template*/
+                    IF squ_ptdet.VERT_flutes = FALSE AND squ_ptdet.horz_flutes = FALSE THEN DO:
+                        RUN ReportIssues(so_items.itemseq,"MM-No Flute Direction",SubstrateType + string(pt_det.pressprintingheight) + "x" + STRING(pt_det.pressprintingwidth)).
+                        RETURN.
                     END.
                     ELSE DO:
-                        IF squ_ptdet.VERT_flute THEN DO:
-                            ASSIGN cHeight = squ_ptdet.pressprintingwidth
-                                   cWidth  = squ_ptdet.pressprintingheight.
-                        END.
-                        ELSE DO:
-                            ASSIGN cHeight = squ_ptdet.PressPrintingHeight
-                                   cWidth  = squ_ptdet.pressprintingwidth.
-                        END.
+                        ASSIGN CurHeight = IF pt_det.vert_flutes THEN squ_ptdet.PressPrintingWidth  ELSE squ_ptdet.pressprintingHeight
+                               CurWidth  = IF pt_det.horz_flutes THEN squ_ptdet.PressPrintingHeight ELSE squ_ptdet.PressPrintingWidth.
                     END.
                 END.
             END. 
             
             /*see if its reflective*/
-            IF CAN-DO(reflectInv,squ_mat.part_no) THEN ASSIGN isReflect = YES.
-            IF isReflect = NO THEN DO:
+            IF LOOKUP(squ_mat.part_no,ReflectInv) > 0 THEN ASSIGN IsReflect = TRUE.
+            IF IsReflect = FALSE THEN DO:
                 FOR EACH bom_file NO-LOCK WHERE bom_file.PARENT = pt_det.part_no:
-                    IF CAN-DO(reflectBom,bom_file.part_no) THEN ASSIGN isReflect = YES.
+                    IF LOOKUP(bom_file.part_no,ReflectBom) > 0 THEN ASSIGN IsReflect = TRUE.
                 END.
             END.
             
-            IF isReflect = NO AND CAN-DO(cMiscParts,so_items.part_no) THEN DO:
+            IF IsReflect = FALSE AND LOOKUP(so_items.part_no,cMiscParts) > 0 THEN DO:
                 /*try and look at both reg order and intercompany*/
                 FOR EACH b_squ_mat NO-LOCK WHERE b_squ_mat.subseq = squ_mat.subseq:
-                    IF CAN-DO(reflectBom,b_squ_mat.part_no) THEN ASSIGN isReflect = YES.
+                    IF LOOKUP(b_squ_mat.part_no,ReflectBom) > 0 THEN ASSIGN IsReflect = TRUE.
                 END.
+                
                 FOR EACH b_squ_mat NO-LOCK WHERE b_squ_mat.subseq = squ_ptdet.subseq:
-                    IF CAN-DO(reflectBom,b_squ_mat.part_no) THEN ASSIGN isReflect = YES.
+                    IF LOOKUP(b_squ_mat.part_no,ReflectBom) > 0 THEN ASSIGN IsReflect = TRUE.
                 END.
             END.           
             
-            invPartNo = squ_mat.part_no.
-            IF isReflect THEN DO: /*Add R to inv part to notify its reflective if not already*/
-                IF (NOT invPartNo MATCHES "*RF" AND NOT invPartNo MATCHES "*R" AND NOT invPartNo MATCHES "*RF-CG") OR (LOOKUP(invPartNo,"RBZCO3024H-RR,RBZCO2236H-RR") > 0) THEN DO: /*added per Mary - RyanLe*/
-                    ASSIGN invPartNo = invPartNo + "RF".
-                END.
+            InvPartNo = squ_mat.part_no.
+            IF IsReflect THEN DO: /*Add R to inv part to notify its reflective if not already*/
+                IF (NOT InvPartNo MATCHES "*RF" 
+                AND NOT InvPartNo MATCHES "*R" 
+                AND NOT InvPartNo MATCHES "*RF-CG") 
+                OR (LOOKUP(InvPartNo,"RBZCO3024H-RR,RBZCO2236H-RR") > 0) THEN ASSIGN InvPartNo = InvPartNo + "RF".
             END.
             
-            RUN CheckDynamicNestCompatability(squ_mat.part_no, cType, IF isReflect THEN cMaterial + " Reflective" ELSE cMaterial, OUTPUT IsDynamicNestCompatable).
+            RUN CheckDynamicNestCompatability(squ_mat.part_no, SubstrateType, IF IsReflect THEN CurMaterial + " Reflective" ELSE CurMaterial, OUTPUT IsDynamNestComp).
             
-            IF IsDynamicNestCompatable THEN DO:
-                RUN checkprecut.p(so_items.itemseq, OUTPUT isPrecut).
-                IF isPrecut THEN IsDynamicNestCompatable = FALSE.
-
+            IF IsDynamNestComp THEN DO:
+                RUN checkprecut.p(so_items.itemseq, OUTPUT IsPrecut).
+                IF IsPrecut THEN IsDynamNestComp = FALSE.
             END.
             
-            IF NOT IsDynamicNestCompatable THEN DO:
+            IF IsDynamNestComp = FALSE THEN DO:
 
                 /*might have an issue here with steel foldovers.*/
-                RUN getTemplate(cType,pt_det.part_no,cHeight,cWidth,(IF cType = "Poly" AND AVAIL squ_ptdet AND squ_ptdet.foldover THEN YES ELSE NO),OUTPUT cTemplate, OUTPUT cPointer, OUTPUT cSwitch).
+                RUN getTemplate(SubstrateType,pt_det.part_no,CurHeight,CurWidth,(IF SubstrateType = "Poly" AND AVAIL squ_ptdet AND squ_ptdet.foldover THEN TRUE ELSE FALSE),OUTPUT TemplateNo,OUTPUT IsSwitch).
                 
-                IF cTemplate = 0 AND NOT can-do("Decal,magnetic,vinyl",cType) THEN DO: /*omegabond,alumalite,*/                    
-                    /*Added this to skip over corex*/
-                    IF INDEX("corex",cType) = 0 THEN RUN reportIssues(so_items.itemseq,"MM-Can't Find Template",so_items.so_no,STRING(so_items.ITEM_no),cType + string(pt_det.pressprintingheight) + "x" + string(pt_det.pressprintingwidth),"","","","","").
+                IF TemplateNo = 0 AND LOOKUP(SubstrateType,"Decal,Magnetic,Vinyl") = 0 AND INDEX("Corex",SubstrateType) = 0 THEN DO:                    
+                    RUN ReportIssues(so_items.itemseq,"MM-Can't Find Template",SubstrateType + STRING(pt_det.pressprintingheight) + "x" + STRING(pt_det.pressprintingwidth)).
+                    RETURN.
                 END.
             
-                /*check to see if part has been modified and is ready for prepcenter.*/
-                IF CAN-FIND(FIRST zz_file NO-LOCK WHERE zz_file.zz_key1 = "mm-corex" AND zz_file.zz_key2 = so_items.part_no AND zz_file.zz_log[1] = YES) THEN DO:
-                    ASSIGN cTemplate = 0.
-                END.
             END.
 
             /*get qty of need panels*/
-            RUN getQty(so_items.itemseq,OUTPUT qtyRan, OUTPUT qtyNeeded, OUTPUT inQueue). 
+            RUN getQty(so_items.itemseq,OUTPUT QtyRan, OUTPUT QtyNeeded, OUTPUT InQueue). 
             
-            hotfolderin = IF NOT squ_ptdet.pt_hotfolderseq <= 0 THEN squ_ptdet.pt_hotfolderseq ELSE pt_det.pt_hotfolderseq.
-            RUN custhotfolder.p(so_items.itemseq,hotfolderin, OUTPUT hotfolderout).
+            CurHotFolderSeq = IF NOT squ_ptdet.pt_hotfolderseq <= 0 THEN squ_ptdet.pt_hotfolderseq ELSE pt_det.pt_hotfolderseq.
+            RUN custhotfolder.p(so_items.itemseq,CurHotFolderSeq, OUTPUT NewHotFolderSeq).
 
             CREATE ttArt.
-            ASSIGN ttArt.ttTempSeq   = cTemplate
+            ASSIGN ttArt.ttTempSeq   = TemplateNo
                    ttArt.ttSize      = STRING(pt_det.pressprintingheight) + "x" + STRING(pt_det.pressprintingwidth)
                    ttArt.ttPart      = so_items.part_no
                    ttArt.ttDue       = so_file.ship_by
@@ -437,22 +422,21 @@ PROCEDURE BuildTT:
                    ttArt.ttItemNo    = so_items.ITEM_no
                    ttArt.ttSides     = IF squ_ptdet.DigitalDF THEN 2 ELSE 1
                    ttArt.ttItemseq   = so_items.itemseq
-                   ttArt.ttInvPart   = invPartNo
+                   ttArt.ttInvPart   = InvPartNo
                    ttArt.ttQty       = qtyNeeded  
-                   ttArt.ttHotFolder = hotfolderout
-                   ttArt.ttSwitch    = cSwitch
-                   ttArt.ttSteelTent = (IF (squ_ptdet.steeltent OR squ_ptdet.jackunit) THEN YES ELSE NO) /* iLoop = 2 THEN TRUE ELSE FALSE*/
-                   ttArt.ttType      = IF isReflect THEN cMaterial + " Reflective" ELSE cMaterial
-                   ttArt.ttExploded  = NO
-                   ttArt.ttDynamNest = IF cTemplate = 0 THEN YES ELSE NO
+                   ttArt.ttHotFolder = NewHotFolderSeq
+                   ttArt.ttSwitch    = IsSwitch
+                   ttArt.ttSteelTent = (IF (squ_ptdet.steeltent OR squ_ptdet.jackunit) THEN TRUE ELSE FALSE) /* iLoop = 2 THEN TRUE ELSE FALSE*/
+                   ttArt.ttType      = IF IsReflect THEN CurMaterial + " Reflective" ELSE CurMaterial
+                   ttArt.ttExploded  = FALSE
+                   ttArt.ttDynamNest = IF TemplateNo = 0 THEN TRUE ELSE FALSE
                    ttArt.ttHorzFlute = squ_ptdet.horz_flutes
                    ttArt.ttVertFlute = squ_ptdet.VERT_flutes
                    .
-            RUN getHotfolder(1,ttArt.ttType,INPUT-OUTPUT ttArt.ttHotFolder, OUTPUT Blah).
+            RUN getHotfolder(1,ttArt.ttType,INPUT-OUTPUT ttArt.ttHotFolder, OUTPUT CurHotFolder).
               
-            lastTTart   = RECID(ttart).
-        END. /*if avail squ_mat*/
-        ELSE RUN ReportIssues(so_items.itemseq,"MM-Planning",so_items.so_no,STRING(so_items.ITEM_no),"","Unable to find panel","","","","").
+        END. 
+        ELSE RUN ReportIssues(so_items.itemseq,"MM-Planning","Unable to find panel").
     END.
 END PROCEDURE.
 
@@ -481,19 +465,19 @@ PROCEDURE CanIRun:
         IF NOT AVAIL zz_file THEN DO:
 
             /*creates the zz_file record*/
-            RUN zz_control(NO,"PID").
-            RUN zz_control(NO,"MM-Running").
-            oRunJM = YES.
+            RUN zz_control(FALSE,"PID").
+            RUN zz_control(FALSE,"MM-Running").
+            oRunJM = TRUE.
             
         END.
-        ELSE oRunJM = NO. /* We're already running JM */
+        ELSE oRunJM = FALSE. /* We're already running JM */
        
     END.
     ELSE DO:
         
         /*OK to run*/
-        RUN zz_control (YES,"MM-Running").
-        oRunJM = YES.
+        RUN zz_control (TRUE,"MM-Running").
+        oRunJM = TRUE.
         
     END.
     
@@ -538,7 +522,7 @@ PROCEDURE CheckImages:
     xplodlist = "".
     
     
-    FOR EACH ttArt WHERE IF NOT RegEngineBuild THEN (ttart.ttItemseq = INT(cItemseq) AND ttArt.ttExploded = NO) ELSE ttArt.ttExploded = NO:
+    FOR EACH ttArt WHERE IF NOT RegEngineBuild THEN (ttart.ttItemseq = INT(cItemseq) AND ttArt.ttExploded = FALSE) ELSE ttArt.ttExploded = FALSE:
         IF RegEngineBuild AND CAN-FIND(FIRST sign_mm_reprint NO-LOCK WHERE sign_mm_reprint.Itemseq = ttArt.ttItemseq AND sign_mm_reprint.COMPLETE = FALSE) THEN DO:
             /* DELAYED REPRINTS*/
             FOR EACH sign_mm_reprint EXCLUSIVE-LOCK WHERE sign_mm_reprint.itemseq = ttArt.ttItemseq AND sign_mm_reprint.COMPLETE = FALSE AND sign_mm_reprint.delayed = TRUE:
@@ -549,7 +533,7 @@ PROCEDURE CheckImages:
                 BUFFER-COPY ttart EXCEPT ttart.ttQty ttart.ttFile TO bbart.
                 ASSIGN bbart.ttqty       = ReprintNeed
                        bbart.ttfile      = sign_mm_reprint.Artfile
-                       bbart.ttExploded  = YES
+                       bbart.ttExploded  = TRUE
                        bbArt.ttReprintId = sign_mm_reprint.ReprintId
                        cImage            = sign_mm_reprint.Artfile.
             END.
@@ -561,7 +545,7 @@ PROCEDURE CheckImages:
             IF NOT AVAIL(squ_ptdet) THEN
                 FIND FIRST squ_ptdet NO-LOCK WHERE squ_ptdet.itemseq = ttart.ttItemseq AND squ_ptdet.TYPE = "frame" NO-ERROR. /*hope its here if panel not on this order*/
                 
-            ASSIGN cImage = ? deleteArt = NO.
+            ASSIGN cImage = ? deleteArt = FALSE.
             
             IF CAN-FIND(FIRST so_art NO-LOCK WHERE so_art.itemseq = ttart.ttitemseq AND so_art.TYPE = "Mini") THEN DO: /*Artlinks Images*/
                 imagecnt = 0. imageQty = 0.
@@ -579,7 +563,7 @@ PROCEDURE CheckImages:
                         END.
                         ELSE IF NUM-ENTRIES(cImage,".") > 2 THEN DO:
                             /*if it looks like it has more that one extention get rid of it and email csr*/
-                            RUN ReportIssues(ttArt.ttItemseq,"MM-Art Image Name Issue",ttart.ttso,STRING(ttart.ttItemNO),"",ttart.ttFile,"","","","").
+                            RUN ReportIssues(ttArt.ttItemseq,"MM-Art Image Name Issue",ttart.ttFile).
                             LEAVE.
                         END.
                         ELSE DO:
@@ -606,7 +590,7 @@ PROCEDURE CheckImages:
                                 IF AVAIL so_items THEN DO:
                                     /*might need something here to try and determine if some of these have been printed if so which ones*/
                                     IF NOT so_items.so_art_override AND imagecnt > so_items.orderqty THEN DO:
-                                        RUN ReportIssues(ttArt.ttItemseq,"MM-ArtLink Qty's Incorrect",ttart.ttso,STRING(ttart.ttItemNO),"","","","","","").
+                                        RUN ReportIssues(ttArt.ttItemseq,"MM-ArtLink Qty's Incorrect","").
                                         LEAVE.
                                     END.
                                 END.
@@ -615,14 +599,14 @@ PROCEDURE CheckImages:
                                     BUFFER-COPY ttart EXCEPT ttart.ttQty ttArt.ttFile TO bbArt.
                                     ASSIGN bbart.ttQty      = so_art.qty - RanTot
                                            bbart.ttFile     = cImage
-                                           bbart.ttExploded = YES.
+                                           bbart.ttExploded = TRUE.
                                 END.
                                 ELSE DO:
                                     CREATE bbArt.
                                     BUFFER-COPY ttArt EXCEPT ttArt.ttQty ttArt.ttFile TO bbart.
                                     ASSIGN bbart.ttQty  =  2 * so_art.qty - RanTot 
                                            bbart.ttFile = cImage
-                                           bbart.ttExploded = YES.
+                                           bbart.ttExploded = TRUE.
                                 END.
                             END.
                             ELSE DO:
@@ -630,7 +614,7 @@ PROCEDURE CheckImages:
                                 IF AVAIL so_items THEN DO:
                                     /*might need something here to try and determine if some of these have been printed if so which ones*/
                                     IF NOT so_items.so_art_override AND imagecnt > so_items.orderqty THEN DO:
-                                        RUN ReportIssues(ttArt.ttItemseq,"MM-ArtLink Qty's Incorrect",ttart.ttso,STRING(ttart.ttItemNO),"","","","","","").
+                                        RUN ReportIssues(ttArt.ttItemseq,"MM-ArtLink Qty's Incorrect","").
     /*                                     RUN trimbeds(string(ttart.ttItemseq)). */
                                         LEAVE.
                                     END.
@@ -648,7 +632,7 @@ PROCEDURE CheckImages:
                                         BUFFER-COPY ttart EXCEPT ttart.ttQty ttart.ttFile TO bbart.
                                         ASSIGN bbart.ttqty      = so_art.qty - RanCnt 
                                                bbart.ttfile     = bbart.ttfile + (IF bbart.ttfile <> "" THEN "," ELSE "") + cImage
-                                               bbart.ttExploded = YES.
+                                               bbart.ttExploded = TRUE.
                                     END.
                                 END.
                                 ELSE DO:
@@ -656,24 +640,23 @@ PROCEDURE CheckImages:
                                     BUFFER-COPY ttart EXCEPT ttart.ttQty ttart.ttFile TO bbart.
                                     ASSIGN bbart.ttqty      = so_art.qty - RanTot
                                            bbart.ttfile     = bbart.ttfile + (IF bbart.ttfile <> "" THEN "," ELSE "") + cImage
-                                           bbart.ttExploded = YES.
+                                           bbart.ttExploded = TRUE.
                                 END.
                             END.
                         END.
                         IF NOT AVAIL ttart THEN LEAVE.
                     END.
-                    deleteArt = YES. /*delete the original b/c we xploded and created new recs*/
+                    deleteArt = TRUE. /*delete the original b/c we xploded and created new recs*/
                 END.
                 ELSE DO:
                     FOR EACH so_art NO-LOCK WHERE so_art.itemseq = ttart.ttitemseq AND so_art.TYPE = "Mini" BY disp_order:
                         ASSIGN cImage = SEARCH(so_art.artfile).
                         IF cImage = ? THEN DO:
-    /*                         deleteArt = YES. */
                             LEAVE.
                         END.
                         ELSE IF NUM-ENTRIES(cImage,".") > 2 THEN DO:
                             /*if it looks like it has more that one extention get rid of it and email csr*/
-                            RUN ReportIssues(ttArt.ttItemseq,"MM-Art Image Name Issue",ttart.ttso,STRING(ttart.ttItemNO),"",ttart.ttFile,"","","","").
+                            RUN ReportIssues(ttArt.ttItemseq,"MM-Art Image Name Issue",ttart.ttFile).
                             LEAVE.
                         END.
                         ELSE DO: 
@@ -693,7 +676,7 @@ PROCEDURE CheckImages:
                             END.
 
                             IF SEARCH(tmpfile) = ? THEN DO:
-                                RUN ReportIssues(ttArt.ttItemseq,"MM-Art Image Name Issue",ttart.ttso,STRING(ttart.ttItemNO),"",ttart.ttFile,"","","","").
+                                RUN ReportIssues(ttArt.ttItemseq,"MM-Art Image Name Issue",ttart.ttFile).
                                 LEAVE.
                             END.
                             
@@ -704,7 +687,7 @@ PROCEDURE CheckImages:
             ELSE IF AVAIL pt_det AND (pt_det.stk_rider = TRUE OR pt_det.zzlog_3 = TRUE OR pt_det.next_day = TRUE) AND pt_det.dart_item = FALSE THEN DO: /*Stock Riders*/               
                 FIND FIRST so_items NO-LOCK WHERE so_items.itemseq = ttart.ttItemseq NO-ERROR.
                 IF (pt_det.steeltent OR pt_det.jackunit) AND pt_det.prodfile1 <> "" AND pt_det.prodfile2 <> "" THEN DO:
-                    DeleteArt = YES.
+                    DeleteArt = TRUE.
                     DO iLoop = 1 TO 2:
                         RanCnt = 0. RanTot = 0.
                         IF RegEngineBuild THEN DO: /*if not a rerun then check*/
@@ -727,7 +710,7 @@ PROCEDURE CheckImages:
                         BUFFER-COPY ttart EXCEPT ttart.ttQty ttart.ttFile TO bbart.
                         ASSIGN bbart.ttqty      = IF ranTot = 0 THEN so_items.orderqty ELSE IF ttArt.ttQty - RanTot <= 0 THEN 0 ELSE ttArt.ttQty - RanTot /*ttArt.ttQty / 2*/
                                bbart.ttfile     = IF iLoop = 1 THEN pt_det.prodfile1 ELSE pt_det.prodfile2
-                               bbart.ttExploded = YES.
+                               bbart.ttExploded = TRUE.
                                
                     END.
                     /* so it doesn't report an issue*/
@@ -749,7 +732,7 @@ PROCEDURE CheckImages:
                             ASSIGN ttArt.ttFile = ttArt.ttFile + (IF ttArt.ttFile = "" THEN "" ELSE ",") +  cBatchImgLoc + "\" + ttArt.ttso + "-" + string(ttArt.ttITEMno) + "-LEFT.pdf".
                             cImage = ttArt.ttFile.
                     END.
-                    ELSE IF pt_det.prodfile2 <> "" AND deleteArt = NO AND SEARCH(pt_det.prodfile2) <> ? THEN DO: 
+                    ELSE IF pt_det.prodfile2 <> "" AND deleteArt = FALSE AND SEARCH(pt_det.prodfile2) <> ? THEN DO: 
                         ASSIGN ttArt.ttFile = ttArt.ttFile + (IF ttArt.ttFile = "" THEN "" ELSE ",") + (IF SEARCH(REPLACE(pt_det.prodfile2,".pdf","_ws.pdf")) <> ? THEN 
                                SEARCH(REPLACE(pt_det.prodfile2,".pdf","_ws.pdf")) ELSE SEARCH(pt_det.prodfile2))
                                cImage = pt_det.prodfile2.
@@ -763,11 +746,11 @@ PROCEDURE CheckImages:
                 IF pt_det.directional AND (pt_det.steeltent OR pt_det.jackunit) THEN DO: /*diff logic for s/f with 2 images - used to say pt_det.steeltent OR pt_det.jackunit but i changed to say directional since -left is never created unless directional*/
                     FIND so_items NO-LOCK WHERE so_items.itemseq = ttart.ttitemseq NO-ERROR.
                     IF NOT AVAIL so_items THEN NEXT.
-                    imgGood = YES.
+                    imgGood = TRUE.
                     DO iLoop = 1 TO 2:
                         ASSIGN cImage = imageShare + "DartProduction\" + ttart.ttSo + "\" + ttart.ttSo + "-" + string(ttArt.ttitemno) + (IF iLoop = 1 THEN ".pdf" ELSE "-left.pdf"). /*changed from ELSE "-left.pdf"*/
                         IF SEARCH(cImage) = ? THEN DO:
-                            imgGood = NO.
+                            imgGood = FALSE.
                         END.
                     END.
                     IF NOT imgGood THEN cImage = ?.
@@ -796,10 +779,10 @@ PROCEDURE CheckImages:
                         BUFFER-COPY ttart EXCEPT ttart.ttQty ttart.ttFile TO bbart.
                         ASSIGN bbart.ttqty  =  so_items.orderqty - RanTot 
                                bbart.ttfile = cImage
-                               bbart.ttExploded = YES.
+                               bbart.ttExploded = TRUE.
                         
                     END.
-                    deleteArt = YES.
+                    deleteArt = TRUE.
                 END.
                 ELSE IF pt_det.qrcode THEN DO: /*QR Code Items*/
                     ASSIGN tmpImage = imageShare + "DartProduction\" + ttart.ttSo + "\" + ttart.ttSo + "-" + string(ttArt.ttitemno) + ".pdf".
@@ -820,7 +803,7 @@ PROCEDURE CheckImages:
                                         CREATE bbart.
                                         BUFFER-COPY ttart EXCEPT ttart.ttQty ttart.ttFile TO bbart.
                                         ASSIGN bbArt.ttQty      = 1
-                                               bbArt.ttExploded = YES
+                                               bbArt.ttExploded = TRUE
                                                bbArt.ttFile     = cImage.
                                         ASSIGN TempInt          = TempInt + 1
                                                TempCnt          = 0.
@@ -842,13 +825,13 @@ PROCEDURE CheckImages:
                                 CREATE bbart.
                                 BUFFER-COPY ttart EXCEPT ttart.ttQty ttart.ttFile TO bbart.
                                 ASSIGN bbArt.ttQty      = LowenTagItems.orderqty
-                                       bbArt.ttExploded = YES
+                                       bbArt.ttExploded = TRUE
                                        bbArt.ttFile     = cImage.
                             END.
                             TempInt = TempInt + 1.
                         END.
                     END.
-                    deleteArt = YES.
+                    deleteArt = TRUE.
                 END.
                 ELSE IF CAN-FIND (zz_file NO-LOCK WHERE zz_file.zz_key1 = "SeqNumberLine" AND zz_file.zz_key2 = ttArt.ttPart) THEN DO:
                     
@@ -881,7 +864,7 @@ PROCEDURE CheckImages:
                         END.
                     END.
                     IF missingSeq THEN cImage = ?.
-                    deleteArt = YES.
+                    deleteArt = TRUE.
                 END.
                 ELSE DO: /*regular sart/dart*/
                     ASSIGN cImage = imageShare + "DartProduction\" + ttart.ttSo + "\" + ttart.ttSo + "-" + string(ttArt.ttitemno) + ".pdf".
@@ -904,7 +887,7 @@ PROCEDURE CheckImages:
         END.
         
         IF cImage = "" THEN cImage = ?.
-        IF cImage = ? THEN RUN ReportIssues(ttArt.ttItemseq,"MM-Art Image Issue" + reason,ttart.ttso,STRING(ttart.ttItemNO),"",ttart.ttFile,"","","","").
+        IF cImage = ? THEN RUN ReportIssues(ttArt.ttItemseq,"MM-Art Image Issue" + reason,ttart.ttFile).
         IF deleteArt THEN DELETE ttArt.
     END.
 
@@ -913,8 +896,8 @@ END PROCEDURE.
 
 PROCEDURE CheckMaterial:
     DEFINE INPUT  PARAMETER cSeq AS INT  NO-UNDO.
-    DEFINE OUTPUT PARAMETER c_ok AS LOG  NO-UNDO INITIAL NO.
-    DEFINE VARIABLE iQty          AS INT  NO-UNDO INITIAL 0.
+    DEFINE OUTPUT PARAMETER c_ok AS LOG  NO-UNDO INITIAL FALSE.
+    DEFINE VARIABLE iQty         AS INT  NO-UNDO INITIAL 0.
     DEFINE VARIABLE cPart        AS CHAR NO-UNDO.
 
     FOR EACH b_ttart WHERE b_ttart.ttItemseq = cSeq:
@@ -924,9 +907,9 @@ PROCEDURE CheckMaterial:
     FIND ttMat WHERE ttMat.ttPart = cPart NO-ERROR.
     IF AVAIL ttMat AND (ttmat.ttQty - iQty > - 1) THEN DO:
         ASSIGN ttmat.ttqty = ttmat.ttqty - iQty
-                      c_ok = YES.
+                      c_ok = TRUE.
     END.
-    ELSE ASSIGN c_ok = NO.
+    ELSE ASSIGN c_ok = FALSE.
 
 END PROCEDURE.
 
@@ -944,7 +927,7 @@ PROCEDURE Checks:
 ------------------------------------------------------------------------------*/
     DEFINE INPUT  PARAMETER pSo             AS CHAR NO-UNDO.
     DEFINE INPUT  PARAMETER pItemNo         AS INT  NO-UNDO.
-    DEFINE OUTPUT PARAMETER oProdReady      AS LOG  NO-UNDO INITIAL NO.
+    DEFINE OUTPUT PARAMETER oProdReady      AS LOG  NO-UNDO INITIAL FALSE.
 
     DEFINE VARIABLE ActivityList            AS CHAR NO-UNDO.    
     DEFINE VARIABLE TotalHours              AS DEC  NO-UNDO.
@@ -1012,7 +995,7 @@ PROCEDURE Checks:
     END.
     
     IF oProdReady = FALSE THEN DO:
-        RUN reportIssues(so_items.itemseq,"Checks:Not Completed Prior Activity",IF AVAIL actlist THEN ActList.ActDesc ELSE "").
+        RUN ReportIssues(so_items.itemseq,"Checks:Not Completed Prior Activity",IF AVAIL actlist THEN ActList.ActDesc ELSE "").
         RETURN.
     END.
     ELSE oProdReady = FALSE.
@@ -1040,7 +1023,7 @@ PROCEDURE Checks:
     /*see if its already printed*/  
     RUN GetQty(so_items.itemseq,OUTPUT QtyRan,OUTPUT QtyNeeded, OUTPUT InQueue).
     IF QtyNeeded <= 0 THEN DO:
-        RUN ReportIssue(so_items.itemseq,IF InQueue THEN "Checks:Queue" ELSE "Checks:Already Printed Via JM","").
+        RUN ReportIssues(so_items.itemseq,IF InQueue THEN "Checks:Queue" ELSE "Checks:Already Printed Via JM","").
         oProdReady = FALSE.
         RETURN.
     END.
@@ -1059,7 +1042,7 @@ PROCEDURE Checks:
     IF CAN-FIND(FIRST h_detail NO-LOCK WHERE h_detail.order_no = so_items.so_no 
                                          AND h_detail.ITEM_no  = STRING(so_items.ITEM_no) 
                                          AND h_detail.activity = "D11" 
-                                         AND h_detail.zzLog_1  = YES) THEN DO:
+                                         AND h_detail.zzLog_1  = TRUE) THEN DO:
         IF NOT CAN-FIND(FIRST sign_mm_reprint NO-LOCK WHERE sign_mm_reprint.itemseq = so_items.itemseq AND sign_mm_reprint.completed = FALSE) THEN DO:
             RUN ReportIssues(so_items.itemseq,"Checks:Already Printed Via JM","").
             oProdReady = FALSE.
@@ -1242,7 +1225,7 @@ PROCEDURE DynamicNest:
     DEFINE VARIABLE cTemplate    AS INTEGER   NO-UNDO.
     DEFINE VARIABLE Blah         AS INTEGER   NO-UNDO.
     DEFINE VARIABLE BlahInt      AS LOGICAL   NO-UNDO.
-    DEFINE VARIABLE isprecut     AS LOGICAL  NO-UNDO INITIAL FALSE.
+    DEFINE VARIABLE isprecut     AS LOGICAL   NO-UNDO INITIAL FALSE.
     
     DEFINE BUFFER bParams FOR tParams.
     DEFINE BUFFER b_tNest FOR tNest.
@@ -1250,7 +1233,7 @@ PROCEDURE DynamicNest:
     
 
      /*first make sure you have all the info you need...occurs in savedown saves sizes to squ_ptdet*/
-    FOR EACH nestArt WHERE nestArt.ttDynamNest = YES BREAK BY nestArt.ttType BY nestArt.ttSides:
+    FOR EACH nestArt WHERE nestArt.ttDynamNest = TRUE BREAK BY nestArt.ttType BY nestArt.ttSides:
         IF nestArt.ttType = ? THEN NEXT.
 
         FIND tParams NO-LOCK WHERE tParams.substrate = nestArt.ttType NO-ERROR.
@@ -1258,7 +1241,7 @@ PROCEDURE DynamicNest:
         IF AVAILABLE squ_ptdet THEN DO:
         
             RUN getSubstrate.p ("",nestArt.ttItemseq,OUTPUT cType,OUTPUT cMaterial).
-            RUN savedown (YES, nestArt.ttItemseq,nestArt.ttFile,cType, STRING(squ_ptdet.pressPrintingHeight) + "x" + STRING(squ_ptdet.pressPrintingWidth), NO,NO).
+            RUN savedown (TRUE, nestArt.ttItemseq,nestArt.ttFile,cType, STRING(squ_ptdet.pressPrintingHeight) + "x" + STRING(squ_ptdet.pressPrintingWidth),FALSE,FALSE).
         END.
         RELEASE squ_ptdet.
     END.
@@ -1267,7 +1250,7 @@ PROCEDURE DynamicNest:
     /*****Zund Replacement******/
     /***************************/ 
     EMPTY TEMP-TABLE tNest.
-    FOR EACH ttart WHERE ttArt.ttDynamNest = YES BREAK BY ttArt.ttType  BY ttArt.ttInvPart BY ttArt.ttSides :
+    FOR EACH ttart WHERE ttArt.ttDynamNest = TRUE BREAK BY ttArt.ttType  BY ttArt.ttInvPart BY ttArt.ttSides :
         IF INDEX(ttArt.ttType,"Corex") > 0 AND LOOKUP(STRING(ttArt.ttTempSeq),"28,29") = 0 THEN NEXT. /*Ryanle - added Corex filter for Prime Center Project*/
         IF ttArt.ttType = ? THEN NEXT.
         
@@ -1284,7 +1267,7 @@ PROCEDURE DynamicNest:
                     IF turning AND switched     THEN switch = FALSE.
                     IF turning AND NOT switched THEN switch = TRUE.
                 END.
-                ELSE switch = NO.                
+                ELSE switch = FALSE.                
                     
                 CREATE tNest.
                 ASSIGN tNest.itemseq   = ttArt.ttItemseq
@@ -1330,15 +1313,15 @@ PROCEDURE DynamicNest:
                                sign_mm_hdr.PointerSeq       = 0
                                sign_mm_hdr.inv_part         = (IF tNest.INVpart <> "" THEN tNest.INVpart ELSE b_ttart.ttInvPart)
                                sign_mm_hdr.qty              = 1
-                               sign_mm_hdr.rerun            = IF cItemseq <> "" THEN YES ELSE NO
-                               sign_mm_hdr.reprint          = IF cItemseq <> "" THEN YES ELSE NO
+                               sign_mm_hdr.rerun            = IF cItemseq <> "" THEN TRUE ELSE FALSE
+                               sign_mm_hdr.reprint          = IF cItemseq <> "" THEN TRUE ELSE FALSE
                                /*sign_mm_hdr.fullbed          = TRUE /*full bed*/*/
                                sign_mm_hdr.pt_hotfolderseq  = b_ttArt.tthotfolder
                                sign_mm_hdr.dynamicTemplate  = tNest.template
                                pCnt                         = 1
                                pSQIN                        = 0
                                DynamicSize                  = STRING(tNest.panelH) + "x" + string(tNest.panelW)
-                               AllSameSize                  = YES. 
+                               AllSameSize                  = TRUE. 
                     END.
 
                     /*create the details*/
@@ -1356,7 +1339,7 @@ PROCEDURE DynamicNest:
                            sign_mm_det.due_date        = b_ttArt.ttDue
                            sign_mm_det.pt_hotfolderseq = b_ttArt.ttHotfolder
                            sign_mm_det.PointerSeq      = sign_mm_hdr.bedseq
-                           sign_mm_det.zzlog_1         = IF b_ttArt.ttCustNo = "53550" THEN YES ELSE NO
+                           sign_mm_det.zzlog_1         = IF b_ttArt.ttCustNo = "53550" THEN TRUE ELSE FALSE
                            sign_mm_det.posx            = tNest.posX
                            sign_mm_det.posy            = tNest.posY
                            sign_mm_det.posxback        = tNest.posXback
@@ -1376,7 +1359,7 @@ PROCEDURE DynamicNest:
                                 TemplateCnt = 0. cTemplate = 0.
                                 RUN getSubstrate.p ("",nestArt.ttItemseq,OUTPUT cType,OUTPUT cMaterial).
                                 RUN checkprecut.p(sign_mm_det.itemseq, OUTPUT isprecut).
-                                RUN getTemplate((IF isPrecut THEN "Steel" ELSE cType),sign_mm_det.part_no,tnest.panelH,tnest.panelW,NO,OUTPUT cTemplate, OUTPUT Blah, OUTPUT BlahInt).
+                                RUN getTemplate((IF isPrecut THEN "Steel" ELSE cType),sign_mm_det.part_no,tnest.panelH,tnest.panelW,FALSE,OUTPUT cTemplate,OUTPUT BlahInt).
                                
                                 IF cTemplate > 0 THEN DO:
                                     FIND signbed NO-LOCK WHERE signbed.seq = cTemplate NO-ERROR.
@@ -1384,23 +1367,23 @@ PROCEDURE DynamicNest:
                                         TemplateCnt = signbed.userdec1 * signbed.userdec2.
                                         IF pCnt = TemplateCnt THEN
                                             ASSIGN sign_mm_hdr.bed_eff = 100
-                                                   sign_mm_hdr.fullbed = YES.
+                                                   sign_mm_hdr.fullbed = TRUE.
                                     END.
                                 END.
                             END.
                             
                             IF sign_mm_hdr.bed_eff = 0 THEN DO:
                                 ASSIGN sign_mm_hdr.bed_eff = pSQIN / 4608 * 100
-                                       sign_mm_hdr.fullbed = IF sign_mm_hdr.bed_eff >= 65 THEN YES ELSE NO.
+                                       sign_mm_hdr.fullbed = IF sign_mm_hdr.bed_eff >= 65 THEN TRUE ELSE FALSE.
                             END.
                         END.
                         ELSE IF INDEX(sign_mm_hdr.matltype,"omegabond") > 0 OR INDEX(sign_mm_hdr.matltype,"Alumalite") > 0 OR INDEX(sign_mm_hdr.matltype,"Corex") > 0 THEN DO:
                             ASSIGN sign_mm_hdr.bed_eff = pSQIN / 4608 * 100
-                                   sign_mm_hdr.fullbed = IF sign_mm_hdr.bed_eff >= 65 THEN YES ELSE NO.
+                                   sign_mm_hdr.fullbed = IF sign_mm_hdr.bed_eff >= 65 THEN TRUE ELSE FALSE.
                         END.
                         ELSE IF INDEX(sign_mm_hdr.matltype,"magnetic") > 0 OR INDEX(sign_mm_hdr.matltype,"Decal") > 0 THEN DO:
                             ASSIGN sign_mm_hdr.bed_eff = pSQIN / 4536 * 100
-                                   sign_mm_hdr.fullbed = YES.
+                                   sign_mm_hdr.fullbed = TRUE.
                             
                         END.
                     END.
@@ -1456,7 +1439,6 @@ PROCEDURE DynamicNest:
         
                             /*determine if these are batch nested...if so explode else leave as single batch*/
                             FOR EACH tNest BREAK BY tNest.bedid BY tNest.posX:
-/*                                 IF NOT CAN-FIND(FIRST b_tNest WHERE b_tNest.bedid = tNest.bedid AND b_tNest.itemseq <> tNest.itemseq) THEN NEXT. /*leave as single batch - *commented out because we want single batches to go to steel beds for i dot reasons*jacksonw*/ */
                                 FIND FIRST b_mm_hdr WHERE b_mm_hdr.batchseq = tNest.itemseq NO-ERROR.
                                 IF AVAILABLE b_mm_hdr THEN DO:
                                     IF FIRST-OF(tNest.bedid) THEN DO:
@@ -1536,7 +1518,7 @@ PROCEDURE DynamicNest:
                                     IF turning AND switched     THEN switch = FALSE.
                                     IF turning AND NOT switched THEN switch = TRUE.
                                 END.
-                                ELSE switch = NO.
+                                ELSE switch = FALSE.
         
                                 /*IF EnableDynCorexRebatch OR CAN-FIND(FIRST zz_file NO-LOCK WHERE zz_file.zz_key1 = "MM-COREX2" AND zz_file.zz_key2 = squ_ptdet.part_no) THEN DO:
                                     CREATE tNest.
@@ -1592,8 +1574,8 @@ PROCEDURE DynamicNest:
                                        sign_mm_hdr.PointerSeq       = 0
                                        sign_mm_hdr.inv_part         = INVpart
                                        sign_mm_hdr.qty              = 1
-                                       sign_mm_hdr.rerun            = IF cItemseq <> "" THEN YES ELSE NO
-                                       sign_mm_hdr.reprint          = IF cItemseq <> "" THEN YES ELSE NO
+                                       sign_mm_hdr.rerun            = IF cItemseq <> "" THEN TRUE ELSE FALSE
+                                       sign_mm_hdr.reprint          = IF cItemseq <> "" THEN TRUE ELSE FALSE
                                        /*sign_mm_hdr.fullbed          = TRUE /*full bed*/*/
                                        sign_mm_hdr.pt_hotfolderseq  = hotFolderseq
                                        sign_mm_hdr.zzlog_3          = TRUE
@@ -1618,7 +1600,7 @@ PROCEDURE DynamicNest:
         
                             IF LAST-OF(tNest.bedid) THEN DO:
                                 ASSIGN sign_mm_hdr.bed_eff = pSQIN / 4608 * 100
-                                       sign_mm_hdr.fullbed = IF sign_mm_hdr.bed_eff >= 65 THEN YES ELSE NO.
+                                       sign_mm_hdr.fullbed = IF sign_mm_hdr.bed_eff >= 65 THEN TRUE ELSE FALSE.
                             END.
                         END.
                     END.
@@ -2038,15 +2020,6 @@ PROCEDURE ExportPDF:
 END PROCEDURE.
 
 
-PROCEDURE FileExists:
-    DEFINE INPUT  PARAMETER iFile      AS CHAR NO-UNDO.
-    DEFINE OUTPUT PARAMETER fileExists AS LOG  NO-UNDO.
-
-    FILE-INFO:FILE-NAME = iFile.
-    IF FILE-INFO:FULL-PATHNAME <> ? THEN fileExists = YES. ELSE fileExists = NO.
-END PROCEDURE.
-
-
 PROCEDURE FindIcNo:
     DEFINE INPUT PARAMETER cItemSeq AS INT  NO-UNDO.
     DEFINE INPUT PARAMETER cSo      AS CHAR NO-UNDO.
@@ -2071,7 +2044,7 @@ PROCEDURE FindIcNo:
     END.
     IF AVAIL b_squ_plan THEN RELEASE b_squ_plan.
 
-    IF guess = "NO" THEN DO:
+    IF guess = "FALSE" THEN DO:
         /*check so_post record to see if it tells me*/
         FOR EACH b_items NO-LOCK WHERE b_items.so_no = STRING(cIC) BY b_items.ITEM_no:
             IF CAN-FIND(FIRST so_post NO-LOCK WHERE so_post.so_no = b_items.so_no AND so_post.ITEM_no = b_items.ITEM_no
@@ -2080,7 +2053,7 @@ PROCEDURE FindIcNo:
             END.
         END.
     END.
-    IF guess = "YES" THEN DO:
+    IF guess = "TRUE" THEN DO:
         IF cICSeq = 0 THEN DO:
             FOR EACH inv_item NO-LOCK WHERE inv_item.inv_no = STRING(cIC) BY inv_item.ITEM_no:
                 IF CAN-FIND(FIRST so_post NO-LOCK WHERE so_post.so_no = inv_item.inv_no AND so_post.ITEM_no = inv_item.ITEM_no
@@ -2194,7 +2167,7 @@ PROCEDURE FindSpace:
     ASSIGN tmpSpace = 0 cSpace = 0.
     FOR EACH bbed NO-LOCK WHERE bbed.seq = cBed,
         LAST beddet NO-LOCK WHERE beddet.seq = cBed :
-        IF CAN-FIND(signbeddet WHERE signbeddet.seq = cBed AND signbeddet.userlog2 = YES) THEN DO: /*2+ rows*/
+        IF CAN-FIND(signbeddet WHERE signbeddet.seq = cBed AND signbeddet.userlog2 = TRUE) THEN DO: /*2+ rows*/
             FIND b_beddet NO-LOCK WHERE b_beddet.seq = cBed AND b_beddet.POSITION = beddet.POSITION - INT(bbed.userdec2) NO-ERROR.
             IF AVAIL b_beddet THEN DO:
 
@@ -2326,7 +2299,7 @@ PROCEDURE GangCheck:
             RUN getQty(so_items.itemseq,OUTPUT qtyRan, OUTPUT qtyNeeded, OUTPUT inQueue).
             IF qtyNeeded < 0 THEN DO:
                 IF NOT CAN-FIND(FIRST batchdet WHERE batchdet.orderno = so_items.so_no AND batchdet.itemno = so_items.ITEM_no) THEN DO:
-                    sendEmail = YES.
+                    sendEmail = TRUE.
                     CREATE batchdet.
                     ASSIGN batchdet.orderno  = so_items.so_no
                            batchdet.itemno   = so_items.ITEM_no
@@ -2344,7 +2317,7 @@ PROCEDURE GangCheck:
                 ASSIGN issuedCount = issuedCount + m_usage.quantity.
             END.
             IF issuedCount >= so_items.orderqty THEN DO:
-                sendEmail = YES.
+                sendEmail = TRUE.
                 DISPLAY sign_mm_hdr.batchseq
                         so_items.so_no 
                         so_items.ITEM_no 
@@ -2450,13 +2423,13 @@ PROCEDURE GenXML:
     RUN sethomefolder.
 
     FOR LAST zz_file EXCLUSIVE-LOCK WHERE zz_file.zz_key1 = "MediaManager" AND zz_file.zz_key2 = "PID":
-        ASSIGN zz_file.zz_log[1] = YES. /*mark as made to genxml*/
+        ASSIGN zz_file.zz_log[1] = TRUE. /*mark as made to genxml*/
     END.
     IF AVAIL zz_file THEN RELEASE zz_file.
 
      DO: /*regular template batches*/
         numRan = 0.
-          FOR EACH sign_mm_hdr WHERE IF cBatch <> "" THEN sign_mm_hdr.rerun = YES  AND sign_mm_hdr.run_time = ? AND sign_mm_hdr.bedseq > 0
+          FOR EACH sign_mm_hdr WHERE IF cBatch <> "" THEN sign_mm_hdr.rerun = TRUE  AND sign_mm_hdr.run_time = ? AND sign_mm_hdr.bedseq > 0
               ELSE sign_mm_hdr.RUN_time = ? AND sign_mm_hdr.bedseq > 0
                   BY sign_mm_hdr.runseq:
                             
@@ -2480,10 +2453,10 @@ PROCEDURE GenXML:
                    IF CorexFO = TRUE THEN NEXT.
               END.
               
-              isReflective = NO. /*ryanle*/
+              isReflective = FALSE. /*ryanle*/
               
               /*set to 'no' so that it only runs each reprint once*/
-              IF sign_mm_hdr.rerun = YES THEN ASSIGN sign_mm_hdr.rerun = NO.
+              IF sign_mm_hdr.rerun = TRUE THEN ASSIGN sign_mm_hdr.rerun = FALSE.
 
               IF INDEX(sign_mm_hdr.matltype,"Magnetic")  > 0 THEN NEXT.
 
@@ -2514,13 +2487,13 @@ PROCEDURE GenXML:
               IF cBatch = "" THEN
                   IF SEARCH(outputfile + "\" + "batch" + string(sign_mm_hdr.batchseq) + "_" + STRING(signbed.imageheight) + "x" + STRING(signbed.imagewidth) + "_" + "1.pdf") <> ? THEN NEXT.
 
-              RUN saveDown(NO,sign_mm_hdr.batchseq,"",sign_mm_hdr.matlType,STRING(signbed.imageheight) + "x" + STRING(signbed.imagewidth),signbed.RESIZE,NO). /*saves down to CS6*/
+              RUN saveDown(FALSE,sign_mm_hdr.batchseq,"",sign_mm_hdr.matlType,STRING(signbed.imageheight) + "x" + STRING(signbed.imagewidth),signbed.RESIZE,FALSE). /*saves down to CS6*/
 
               IF NOT AVAIL(sign_mm_hdr) THEN NEXT. /*if just deleted then move on*/
-              chgCorex = NO.
+              chgCorex = FALSE.
 
               RUN imagediff(sign_mm_hdr.batchseq,OUTPUT foundDiff).
-              IF INDEX(sign_mm_hdr.matltype,"corex") > 0 THEN foundDiff = YES.
+              IF INDEX(sign_mm_hdr.matltype,"corex") > 0 THEN foundDiff = TRUE.
               
               /*reflective Corex Code - 12/17/20 - RyanLe*/
               IF INDEX(sign_mm_hdr.matltype,"COREX") > 0 THEN DO:
@@ -2530,8 +2503,8 @@ PROCEDURE GenXML:
                           IF INDEX(so_items.partdesc,"REFLECTIVE 4MM CP") = 0 THEN NEXT.
                           FIND FIRST squ_ptdet NO-LOCK WHERE squ_ptdet.itemseq = so_items.itemseq AND squ_ptdet.type = "Panel" NO-ERROR.
                           IF AVAIL squ_ptdet THEN DO:                          
-                              IF squ_ptdet.DigitalSF = TRUE THEN foundDiff = NO. ELSE foundDiff = YES.
-                              isReflective = YES.  
+                              IF squ_ptdet.DigitalSF = TRUE THEN foundDiff = FALSE. ELSE foundDiff = TRUE.
+                              isReflective = TRUE.  
                               sign_mm_hdr.bedseq = 19.
                               LEAVE. 
                           END.
@@ -2555,7 +2528,7 @@ PROCEDURE GenXML:
 
                   IF INDEX(sign_mm_hdr.matltype,"corex") > 0 AND iLoop = 1 THEN template = signBed.template1.
                   ELSE IF INDEX(sign_mm_hdr.matltype,"corex") > 0 AND iLoop = 2 THEN template = signBed.template2.
-                  IF isReflective = YES THEN template = "". /*Ryanle - relfective corex 12/17/20*/
+                  IF isReflective = TRUE THEN template = "". /*Ryanle - relfective corex 12/17/20*/
                   
                   
                   IF template = "" THEN DO:
@@ -2565,7 +2538,7 @@ PROCEDURE GenXML:
                   RUN xmltag ("bedType",     "CUSTOM",                       INPUT-OUTPUT xmldata).
                   RUN xmltag ("batchno",     sign_mm_hdr.batchseq,           INPUT-OUTPUT xmldata).
                   
-                  IF isReflective = YES THEN DO:
+                  IF isReflective = TRUE THEN DO:
                        RUN xmltag ("bedseq","19",INPUT-OUTPUT xmldata). /*Ryanle - relfective corex 12/17/20*/
                   END.
                   ELSE RUN xmltag ("bedseq",      sign_mm_hdr.bedseq,INPUT-OUTPUT xmldata).
@@ -2578,10 +2551,10 @@ PROCEDURE GenXML:
                   RUN xmltag ("width",       STRING(tmpWidth) ,              INPUT-OUTPUT xmldata).
                   RUN xmltag ("height",      STRING(tmpHeight),              INPUT-OUTPUT xmldata).
                   
-                  IF INDEX(signBed.MatrlType,"corex") > 0 AND isReflective = NO THEN RUN xmltag ("bedHeight","48",INPUT-OUTPUT xmldata).
+                  IF INDEX(signBed.MatrlType,"corex") > 0 AND isReflective = FALSE THEN RUN xmltag ("bedHeight","48",INPUT-OUTPUT xmldata).
                   ELSE RUN xmltag ("bedHeight","61",INPUT-OUTPUT xmldata).
                   
-                  RUN xmltag ("materialtype",IF INDEX(signbed.matrlType,"Corex") = 0 AND index(sign_mm_hdr.matltype,"corex") > 0 OR isReflective = YES THEN "Steel" ELSE sign_mm_hdr.matltype ,INPUT-OUTPUT xmldata).
+                  RUN xmltag ("materialtype",IF INDEX(signbed.matrlType,"Corex") = 0 AND index(sign_mm_hdr.matltype,"corex") > 0 OR isReflective = TRUE THEN "Steel" ELSE sign_mm_hdr.matltype ,INPUT-OUTPUT xmldata).
                   RUN xmltag ("template",    "false" ,                       INPUT-OUTPUT xmldata).
 
                   ASSIGN xmldata = xmldata + "<images>".
@@ -2621,18 +2594,18 @@ PROCEDURE GenXML:
                       /*add code incase there is for ex 2 small size in place of one large sign*/
                       ASSIGN xmldata   = xmldata + "<item>"
                              cPosition = sign_mm_det.POSITION
-                             useHalf   = NO.
+                             useHalf   = FALSE.
 
                       IF iLoop = 2 AND index(sign_mm_hdr.matltype,"corex") > 0 THEN DO:
                           FIND FIRST b_beddet NO-LOCK WHERE b_beddet.seq = sign_mm_hdr.bedseq AND b_beddet.POSITION = sign_mm_det.POSITION NO-ERROR.                         
                           IF AVAIL b_beddet AND (sign_mm_hdr.bedseq <> 30 AND sign_mm_hdr.bedseq <> 31 AND sign_mm_hdr.bedseq <> 81) THEN DO:
-                              templog = NO.
-                              IF b_beddet.userlog1 = YES THEN templog = YES.
-                              IF templog = YES AND sign_mm_det.switch = YES THEN templog = NO.
-                              IF templog = NO AND sign_mm_det.switch = YES THEN templog = YES.
+                              templog = FALSE.
+                              IF b_beddet.userlog1 = TRUE THEN templog = TRUE.
+                              IF templog = TRUE AND sign_mm_det.switch = TRUE THEN templog = FALSE.
+                              IF templog = FALSE AND sign_mm_det.switch = TRUE THEN templog = TRUE.
                               RUN reNumber(sign_mm_hdr.batchseq /* sign_mm_hdr.bedseq */,
                                           sign_mm_det.POSITION,
-                                          (/*IF templog = YES THEN "Vertical" ELSE*/ "Horizontal"),
+                                          ("Horizontal"),
                                           signBed.userdec1,
                                           signBed.userdec2,
                                           OUTPUT cPosition,
@@ -2689,20 +2662,20 @@ PROCEDURE GenXML:
                           RUN xmltag ("coordy", yCoord,              INPUT-OUTPUT xmldata).
 
 
-                          specCorex = NO.
+                          specCorex = FALSE.
                           IF avail(squ_ptdet) AND avail(pt_det) AND index(IF NOT CAN-DO(cMiscParts,sign_mm_det.part_no) THEN pt_det.pt_substrate ELSE squ_ptdet.part_no,"Corex 10mm") > 0 THEN DO:
                               IF squ_ptdet.pt_height = 48 AND squ_ptdet.pt_width = 48 THEN specCorex = TRUE.
                               IF squ_ptdet.pt_height = 12 AND squ_ptdet.pt_width = 48  OR squ_ptdet.pt_height = 48 AND squ_ptdet.pt_width = 12  THEN specCorex = TRUE.
                           END.
 
-                          IF isReflective = YES THEN DO: /*Ryanle - relfective corex 12/17/20*/
+                          IF isReflective = TRUE THEN DO: /*Ryanle - relfective corex 12/17/20*/
                               RUN xmltag("turn","NO",INPUT-OUTPUT xmldata).    
                           END.
                           ELSE DO:
                               IF INDEX(sign_mm_hdr.matltype,"corex") > 0  AND NOT specCorex THEN DO: 
-                                      IF squ_ptdet.VERT_flute = NO AND squ_ptdet.horz_flute = NO THEN
+                                      IF squ_ptdet.VERT_flute = FALSE AND squ_ptdet.horz_flute = FALSE THEN
                                           RUN xmltag ("turn"  , IF AVAIL pt_det AND pt_det.horz_flutes THEN "NO" ELSE "YES", INPUT-OUTPUT xmldata).
-                                      ELSE IF  squ_ptdet.VERT_flutes = YES OR squ_ptdet.horz_flutes = YES THEN
+                                      ELSE IF  squ_ptdet.VERT_flutes = TRUE OR squ_ptdet.horz_flutes = TRUE THEN
                                           RUN xmltag ("turn"  , IF AVAIL squ_ptdet AND squ_ptdet.horz_flutes THEN "NO" ELSE "YES", INPUT-OUTPUT xmldata).
                                       ELSE
                                           RUN xmltag ("turn"  , IF sign_mm_det.switch THEN NOT signbeddet.userlog1 ELSE signbeddet.userlog1, INPUT-OUTPUT xmldata).
@@ -2710,7 +2683,7 @@ PROCEDURE GenXML:
                               ELSE IF sign_mm_hdr.runseq MODULO 2 = 0 THEN
                                   RUN xmltag ("turn"  , IF sign_mm_det.switch THEN NOT signbeddet.userlog1 ELSE signbeddet.userlog1, INPUT-OUTPUT xmldata).
                               ELSE
-                                  RUN xmltag ("turn"  , NO, INPUT-OUTPUT xmldata).
+                                  RUN xmltag ("turn"  , FALSE, INPUT-OUTPUT xmldata).
                           END.
                           RUN xmltag ("toprow", signbeddet.userlog2, INPUT-OUTPUT xmldata).
 
@@ -2754,7 +2727,7 @@ PROCEDURE GenXML:
      
      /*IF lDynNest THEN DO: /*dynamic nest batches YOUSAF LOOK HERE*/*/
         numRan = 0.
-        FOR EACH sign_mm_hdr WHERE IF cBatch <> "" THEN sign_mm_hdr.rerun = YES  AND sign_mm_hdr.run_time = ? AND sign_mm_hdr.bedseq = 0 
+        FOR EACH sign_mm_hdr WHERE IF cBatch <> "" THEN sign_mm_hdr.rerun = TRUE  AND sign_mm_hdr.run_time = ? AND sign_mm_hdr.bedseq = 0 
                                                    ELSE sign_mm_hdr.RUN_time = ? AND sign_mm_hdr.bedseq = 0 BY sign_mm_hdr.runseq:
   
               CorexFO = FALSE.
@@ -2786,7 +2759,7 @@ PROCEDURE GenXML:
                     BUFFER-COPY nest_mm_hdr TO tempHdr.
                     ASSIGN nestcnt             = nestcnt + 1
                            tempHdr.order       = nestcnt
-                           tempHdr.BatchNested = NO
+                           tempHdr.BatchNested = FALSE
                            tempHdr.zzchar_1    = "multibatch".
                     
                     errCnt = 0.
@@ -2804,7 +2777,7 @@ PROCEDURE GenXML:
                 BUFFER-COPY sign_mm_hdr TO tempHdr.
                 ASSIGN nestcnt             = nestcnt + 1
                        tempHdr.order       = nestcnt
-                       temphdr.BatchNested = YES
+                       temphdr.BatchNested = TRUE
                        hdrCnt              = 0.
                        
                 errCnt = 0.
@@ -2858,7 +2831,7 @@ PROCEDURE GenXML:
             FOR EACH tempHdr BY tempHdr.order:
 
                 /*set to 'no' so that it only runs each reprint once*/
-                IF sign_mm_hdr.rerun = YES THEN ASSIGN sign_mm_hdr.rerun = NO.
+                IF sign_mm_hdr.rerun = TRUE THEN ASSIGN sign_mm_hdr.rerun = FALSE.
 
                 FIND FIRST tParams NO-LOCK WHERE tParams.substrate = (IF tempHdr.BatchNested THEN "Steel 24ga" ELSE tempHdr.matltype) 
                                              AND (IF tempHdr.BatchNested THEN TRUE ELSE tParams.template = tempHdr.DynamicTemplate)  NO-ERROR.
@@ -2889,7 +2862,7 @@ PROCEDURE GenXML:
                 IF cBatch = "" THEN  
                     IF SEARCH(outputfile + "\" + "batch" + string(tempHdr.batchseq) + "_" + "1.pdf") <> ? THEN NEXT.
 
-                IF NOT tempHdr.BatchNested THEN RUN saveDown(NO,tempHdr.batchseq,"",tempHdr.matlType,STRING(tmpHeight) + "x" + STRING(tmpWidth),NO,sign_mm_hdr.BatchNested). /*saves down to CS6*/
+                IF NOT tempHdr.BatchNested THEN RUN saveDown(FALSE,tempHdr.batchseq,"",tempHdr.matlType,STRING(tmpHeight) + "x" + STRING(tmpWidth),FALSE,sign_mm_hdr.BatchNested). /*saves down to CS6*/
 
                 /*verify that nothing failed failed on savedown...if it did then remove the temp records*/
                 IF NOT tempHdr.BatchNested THEN DO:
@@ -2900,11 +2873,11 @@ PROCEDURE GenXML:
                             DELETE tempDet.
                     END.
                 END.
-                chgCorex = NO.
+                chgCorex = FALSE.
 
                 RUN imagediff(tempHdr.batchseq,OUTPUT foundDiff).
-                IF INDEX(tempHdr.matltype,"corex") > 0 THEN foundDiff = YES.
-                IF tempHdr.bedseq = 0 THEN foundDiff = YES. /*make sure that sheeted/dynamic stuff has both sides printed*/
+                IF INDEX(tempHdr.matltype,"corex") > 0 THEN foundDiff = TRUE.
+                IF tempHdr.bedseq = 0 THEN foundDiff = TRUE. /*make sure that sheeted/dynamic stuff has both sides printed*/
                 
                 ASSIGN iBatchCnt   = iBatchCnt + 1
                        iBatchSides = iBatchSides + (tempHdr.sides * tempHdr.qty)
@@ -2987,7 +2960,7 @@ PROCEDURE GenXML:
                         /*add code incase there is for ex 2 small size in place of one large sign*/
                         ASSIGN xmldata   = xmldata + "<item>"
                                cPosition = tempDet.POSITION
-                               useHalf   = NO.
+                               useHalf   = FALSE.
                                turning = tempDet.switch.
                                
                                
@@ -3023,7 +2996,7 @@ PROCEDURE GenXML:
                             END.
 
                         END.
-                        IF tmpWidth = 31.4375 AND tmpHeight = 24.5 THEN turning = YES. /*ryanle - Multibatch*/ 
+                        IF tmpWidth = 31.4375 AND tmpHeight = 24.5 THEN turning = TRUE. /*ryanle - Multibatch*/ 
                         RUN xmltag ("turn"  , turning,                  INPUT-OUTPUT xmldata).                        
                         RUN xmltag ("toprow", "no",                     INPUT-OUTPUT xmldata).
 
@@ -3096,9 +3069,9 @@ PROCEDURE GET_Mach_Time:
     END.
 
     RUN getHotfolder(sign_mm_hdr.batchseq,sign_mm_hdr.matlType,INPUT-OUTPUT cHotfolderseq, OUTPUT outputfile).
-    IF INDEX(outputfile, "34 Text") > 0 THEN t34 = YES. ELSE t34 = NO.
+    IF INDEX(outputfile, "34 Text") > 0 THEN t34 = TRUE. ELSE t34 = FALSE.
     
-    RUN squtime-flatbeddigitalprinting.p  (IF INDEX(sign_mm_hdr.matltype,"Steel") > 0 THEN "Steel" ELSE "Other",detCnt, dec(tmpH),dec(tmpW),IF sign_mm_hdr.sides = 2 THEN YES ELSE NO,IF INDEX(sign_mm_hdr.matltype,"Corex") > 0 THEN YES ELSE NO,cHotfolderseq,OUTPUT oMinutes,OUTPUT oMachMins).
+    RUN squtime-flatbeddigitalprinting.p  (IF INDEX(sign_mm_hdr.matltype,"Steel") > 0 THEN "Steel" ELSE "Other",detCnt, dec(tmpH),dec(tmpW),IF sign_mm_hdr.sides = 2 THEN TRUE ELSE FALSE,IF INDEX(sign_mm_hdr.matltype,"Corex") > 0 THEN TRUE ELSE FALSE,cHotfolderseq,OUTPUT oMinutes,OUTPUT oMachMins).
     oMachMins = oMachMins * (sign_mm_hdr.qty - sign_mm_hdr.qty_printed).
 END PROCEDURE.
 
@@ -3189,7 +3162,7 @@ PROCEDURE GetHotFolder:
     
     IF SendError THEN DO:
         FOR EACH b_mm_det NO-LOCK WHERE b_mm_det.batchseq = cBatch: 
-            RUN reportIssues (b_mm_det.itemseq,"MM-Hotfolder not found",cMaterial,cPrintNum,"","",cBatch,"","","").
+            RUN reportIssues (b_mm_det.itemseq,"MM-Hotfolder not found","").
         END.
         ASSIGN cHotFolder = "Error".
     END.
@@ -3218,7 +3191,6 @@ PROCEDURE GetTemplate:
     DEFINE INPUT  PARAMETER vWidth  AS DEC  NO-UNDO.
     DEFINE INPUT  PARAMETER vTent   AS LOG  NO-UNDO.
     DEFINE OUTPUT PARAMETER vSeq    AS INT  NO-UNDO.
-    DEFINE OUTPUT PARAMETER vSeq2   AS INT  NO-UNDO.
     DEFINE OUTPUT PARAMETER vSwitch AS LOG  NO-UNDO . /*height and width are switched - generally for corex vert flutes*/
     DEFINE VARIABLE vTent1          AS LOG  NO-UNDO.
     DEFINE VARIABLE vTent2          AS LOG  NO-UNDO.
@@ -3232,7 +3204,7 @@ PROCEDURE GetTemplate:
     DEFINE VARIABLE tmpCnt2         AS INT  NO-UNDO.
     DEFINE VARIABLE specTemp        AS CHAR NO-UNDO INITIAL "21,22,32,69,52".
     DEFINE VARIABLE polytab         AS CHAR NO-UNDO INITIAL "P181,P182,P183,P183B,P188QR,P184,P189".
-    DEFINE VARIABLE isPolyTab       AS LOG  NO-UNDO INITIAL NO. 
+    DEFINE VARIABLE isPolyTab       AS LOG  NO-UNDO INITIAL FALSE. 
     DEFINE VARIABLE specCorex       AS LOG  NO-UNDO.
     DEFINE VARIABLE vertFlute       AS LOG  NO-UNDO.
     DEFINE VARIABLE horzFlute       AS LOG  NO-UNDO.
@@ -3246,7 +3218,7 @@ PROCEDURE GetTemplate:
            point2  = 0 
            tmpCnt1 = 0 
            tmpCnt2 = 0 
-           vSwitch = NO.
+           vSwitch = FALSE.
 
     /*aluminum and acrylic to run just like steel*/
     IF CAN-DO("omegabond,alumalite,Aluminum,Acrylic",vType) THEN ASSIGN vType = "Steel".
@@ -3263,7 +3235,7 @@ PROCEDURE GetTemplate:
     IF vType = "Corex" AND NOT specCorex THEN DO: /*special beds for corex*/
         /*figure flutes*/
            
-        IF squ_ptdet.VERT_flutes = NO AND squ_ptdet.horz_flutes = NO THEN DO:
+        IF squ_ptdet.VERT_flutes = FALSE AND squ_ptdet.horz_flutes = FALSE THEN DO:
             ASSIGN vertFlute = pt_det.VERT_flutes
                    horzFlute = pt_det.horz_flutes.
         END.
@@ -3272,77 +3244,50 @@ PROCEDURE GetTemplate:
                    horzFlute = squ_ptdet.horz_flutes.
         END.
         
-        IF CAN-FIND(pt_det NO-LOCK WHERE pt_det.part_no = vPart AND pt_det.longdesc MATCHES "*Arrow Shape*") THEN 
-            ASSIGN vSeq  = 30
-                   vSeq2 = 30.
+        IF CAN-FIND(pt_det NO-LOCK WHERE pt_det.part_no = vPart AND pt_det.longdesc MATCHES "*Arrow Shape*") THEN ASSIGN vSeq  = 30.
+        
         IF CAN-FIND(pt_det NO-LOCK WHERE pt_det.part_no = vPart AND pt_det.longdesc MATCHES "*Arrow Shape*") THEN DO:
             FIND FIRST signBed NO-LOCK WHERE signbed.matrlType = "Corex" AND signBed.imageHeight = vheight AND signBed.imageWidth = vwidth AND signbed.note BEGINS "Arrow" NO-ERROR.
-            IF AVAIL signbed THEN DO:
-                 ASSIGN vSeq  = signbed.seq
-                        vSeq2 = signbed.tempseq.
-            END.
+            IF AVAIL signbed THEN ASSIGN vSeq  = signbed.seq.
+            
             IF NOT AVAIL signbed THEN DO:
-            FIND FIRST signBed NO-LOCK WHERE signbed.matrlType = "Corex" AND signBed.imageHeight = vwidth AND signBed.imageWidth = vheight AND signbed.note BEGINS "Arrow" NO-ERROR.
-            IF AVAIL signbed THEN DO:
-                 ASSIGN vSeq  = signbed.seq
-                        vSeq2 = signbed.tempseq.
-            END.
+                FIND FIRST signBed NO-LOCK WHERE signbed.matrlType = "Corex" AND signBed.imageHeight = vwidth AND signBed.imageWidth = vheight AND signbed.note BEGINS "Arrow" NO-ERROR.
+                IF AVAIL signbed THEN ASSIGN vSeq  = signbed.seq.
             END.
         END.
-        ELSE IF CAN-FIND(pt_det NO-LOCK WHERE pt_det.part_no = vPart AND pt_det.longdesc MATCHES "*House Shape*") THEN
-            ASSIGN vSeq  = 31
-                   vSeq2 = 31. 
+        ELSE IF CAN-FIND(pt_det NO-LOCK WHERE pt_det.part_no = vPart AND pt_det.longdesc MATCHES "*House Shape*") THEN ASSIGN vSeq  = 31. 
         ELSE DO:
             
             IF horzFlute THEN DO:
                 FIND FIRST signBed NO-LOCK WHERE signbed.matrlType = "Corex" AND signBed.imageHeight = vHeight AND signBed.imageWidth = vWidth NO-ERROR.
-                IF AVAIL signbed THEN DO:
-                    ASSIGN vSeq  = signbed.seq
-                           vSeq2 = signbed.TempSeq.
-                END.
+                IF AVAIL signbed THEN ASSIGN vSeq  = signbed.seq.
             END.
             ELSE DO:
                 FIND FIRST signBed NO-LOCK WHERE signbed.matrlType = "Corex" AND signBed.imageHeight = vWidth AND signBed.imageWidth = vHeight NO-ERROR. 
-                IF AVAILABLE signbed THEN DO:
-                ASSIGN vSeq    = signbed.seq
-                       vSeq2   = signbed.TempSeq
-                       vSwitch = YES.
-                END.
+                IF AVAILABLE signbed THEN ASSIGN vSeq    = signbed.seq
+                                                 vSwitch = TRUE.
                 ELSE DO:
                     FIND FIRST signBed NO-LOCK WHERE signbed.matrlType = "Corex" AND signBed.imageHeight = vHeight AND signBed.imageWidth = vWidth NO-ERROR.
-                    IF AVAIL signbed THEN DO:
-                        ASSIGN vSeq  = signbed.seq
-                               vSeq2 = signbed.TempSeq.      
-                    END.
+                    IF AVAIL signbed THEN ASSIGN vSeq  = signbed.seq.      
                 END.
             END.
         END.
-        IF NOT vertFlute AND NOT horzFlute THEN DO:
-            ASSIGN vSeq  = 0
-                   vSeq2 = 0.
-        END.
+        IF NOT vertFlute AND NOT horzFlute THEN ASSIGN vSeq  = 0.
     END.
     ELSE DO:
-        vTent1 = NO. vTent2 = NO. vTent3 = NO. vtent4 = NO.
+        vTent1 = FALSE. vTent2 = FALSE. vTent3 = FALSE. vtent4 = FALSE.
         IF vType = "Poly" THEN DO:
             IF pt_det.FoldOver OR vTent THEN DO:
                 IF (vHeight = 18 AND vWidth = 24) OR (pt_det.PressPrintingHeight = 36 AND pt_det.PressPrintingWidth = 24) THEN vTent1 = TRUE.
                 IF ((vHeight = 24 AND vWidth = 24) OR (pt_det.pt_Height = 48 AND pt_det.pt_width = 24) OR (pt_det.PressPrintingHeight = 48 AND pt_det.PressPrintingWidth = 24)) THEN vTent2 = TRUE.
                 IF (vHeight = 24 AND vWidth = 30) OR (pt_det.PressPrintingHeight = 48 AND pt_det.PressPrintingWidth = 30) THEN vTent3 = TRUE.
                 IF (vHeight = 30 AND vWidth = 24) OR (pt_det.PressPrintingHeight = 60 AND pt_det.PressPrintingWidth = 24) THEN vTent4 = TRUE.
-                IF vTent1 THEN 
-                    ASSIGN vSeq  = 21
-                           vSeq2 = 21.
-                ELSE IF vTent2 THEN
-                    ASSIGN vSeq  = 22
-                           vSeq2 = 22.
-                ELSE IF vTent3 THEN
-                    ASSIGN vSeq  = 32
-                           vSeq2 = 32.
-                ELSE IF vTent4 THEN
-                    ASSIGN vSeq  = 94
-                           vSeq2 = 94.
+                IF vTent1      THEN ASSIGN vSeq  = 21.
+                ELSE IF vTent2 THEN ASSIGN vSeq  = 22.
+                ELSE IF vTent3 THEN ASSIGN vSeq  = 32.
+                ELSE IF vTent4 THEN ASSIGN vSeq  = 94.
             END.
+            
             /*if its a polytab rider put on bed 8*/
             IF AVAIL so_items THEN DO:
                 IF INDEX(so_items.partdesc,"poly") > 0 AND INDEX(so_items.partdesc,"tab") > 0 AND INDEX(so_items.partdesc,"estab") = 0 THEN ASSIGN isPolyTab = TRUE.
@@ -3352,30 +3297,24 @@ PROCEDURE GetTemplate:
             IF vpart <> "39P183" THEN DO:
                 DO iloop = 1 TO NUM-ENTRIES(polytab):
                     IF vpart MATCHES "*" + ENTRY(iLoop,polytab) THEN DO:
-                        ASSIGN vSeq  = 8
-                               vSeq2 = 8.
+                        ASSIGN vSeq  = 8.
                         RETURN.
                     END.
                 END.
                 IF isPolyTab THEN DO:
-                    ASSIGN vSeq  = 8
-                           vSeq2 = 8.
+                    ASSIGN vSeq  = 8.
                     RETURN.
                 END.
             END.
         END.
         IF vSeq = 0 THEN DO:
             FIND FIRST signBed NO-LOCK WHERE signBed.imageHeight = vHeight AND signBed.imageWidth = vWidth AND signbed.matrlType <> "Corex" NO-ERROR.
-            IF AVAIL signbed THEN DO:
-                ASSIGN vSeq  = signbed.seq
-                       vSeq2 = signbed.TempSeq.
-            END.
+            IF AVAIL signbed THEN ASSIGN vSeq  = signbed.seq.
             ELSE DO: 
                 FIND FIRST signBed NO-LOCK WHERE signBed.imageHeight = vWidth AND signBed.imageWidth = vHeight AND signbed.matrlType <> "Corex" NO-ERROR. 
                 IF AVAILABLE signbed THEN DO:
                     ASSIGN vSeq    = signbed.seq
-                           vSeq2   = signbed.TempSeq
-                           vSwitch = YES.
+                           vSwitch = TRUE.
                 END.
                 ELSE DO:
                     FOR EACH signbed NO-LOCK WHERE signbed.matrlType <> "Corex" BY signbed.imageheight BY signbed.imagewidth :
@@ -3393,17 +3332,11 @@ PROCEDURE GetTemplate:
                     END.
                     
                     /*found beds both ways now see which is more efficient*/ 
-                    IF tmpCnt1 > tmpCnt2 THEN
-                        ASSIGN vSeq  = tmpseq1
-                               vSeq2 = point1.
-                    ELSE
-                        ASSIGN vSeq    = tmpseq2
-                               vSeq2   = point2
-                               vSwitch = YES.
+                    IF tmpCnt1 > tmpCnt2 THEN ASSIGN vSeq  = tmpseq1.
+                    ELSE ASSIGN vSeq    = tmpseq2
+                                vSwitch = TRUE.
 
-                    IF vHeight = 8 AND vWidth = 18 THEN
-                        ASSIGN vSeq  = 6
-                               vSeq2 = 6. 
+                    IF vHeight = 8 AND vWidth = 18 THEN ASSIGN vSeq  = 6. 
                 END.
             END.
         END.
@@ -3424,7 +3357,7 @@ PROCEDURE GetQty:
     DEFINE VARIABLE reprintsInQueue AS LOGICAL NO-UNDO.
     DEFINE VARIABLE tmpInt          AS INT NO-UNDO.
 
-    inQueue = NO.
+    inQueue = FALSE.
     FIND FIRST buf_so_items NO-LOCK WHERE buf_so_items.itemseq = pSeq NO-ERROR.
     FIND FIRST squdet NO-LOCK WHERE squdet.itemseq = pSeq AND squdet.TYPE <> "Frame" NO-ERROR.
     IF AVAIL buf_so_items AND AVAIL squdet THEN DO:
@@ -3434,10 +3367,9 @@ PROCEDURE GetQty:
         FOR EACH buf_mm_det NO-LOCK WHERE buf_mm_det.itemseq = pSeq BREAK BY buf_mm_det.batchseq:
             tmpint = tmpint + 1.
             IF LAST-OF(buf_mm_det.batchseq) THEN DO:
-                /*inQueue = NO.*/
                 FIND buf_mm_hdr OF buf_mm_det NO-LOCK NO-ERROR.
                 IF AVAIL buf_mm_hdr THEN DO:
-                    IF buf_mm_hdr.RUN_time = ? THEN inQueue = YES.
+                    IF buf_mm_hdr.RUN_time = ? THEN inQueue = TRUE.
                     
                     IF buf_mm_hdr.qty_printed > 0 THEN pRan = pRan + (tmpint * buf_mm_hdr.qty_printed).
                     ELSE pRan = pRan + (tmpint * buf_mm_hdr.qty).
@@ -3528,8 +3460,8 @@ PROCEDURE Grouping:
                        sign_mm_hdr.bedseq           = ttArt.ttTempSeq
                        sign_mm_hdr.inv_part         = ttArt.ttInvpart
                        sign_mm_hdr.qty              = 1
-                       sign_mm_hdr.rerun            = IF cItemseq <> "" THEN YES ELSE NO
-                       sign_mm_hdr.reprint          = IF cItemseq <> "" THEN YES ELSE NO
+                       sign_mm_hdr.rerun            = IF cItemseq <> "" THEN TRUE ELSE FALSE
+                       sign_mm_hdr.reprint          = IF cItemseq <> "" THEN TRUE ELSE FALSE
                        sign_mm_hdr.fullbed          = TRUE /*full bed*/
                        sign_mm_hdr.pt_hotfolderseq  = ttArt.ttHotFolder
                        . 
@@ -3551,7 +3483,7 @@ PROCEDURE Grouping:
                            sign_mm_det.pt_hotfolderseq = ttArt.ttHotfolder
                            sign_mm_det.PointerSeq      = sign_mm_hdr.bedseq
                            sign_mm_det.switch          = ttArt.ttSwitch
-                           sign_mm_det.zzlog_1         = IF ttArt.ttCustNo = "53550" THEN YES ELSE NO
+                           sign_mm_det.zzlog_1         = IF ttArt.ttCustNo = "53550" THEN TRUE ELSE FALSE
                            sign_mm_det.reprintId       = ttArt.ttReprintId
                            pCnt                        = pCnt + 1.
                            
@@ -3564,7 +3496,7 @@ PROCEDURE Grouping:
                 /*attempt complete mix batch*/
                 tmpLog = FALSE.
                 FOR EACH sign_mm_hdr WHERE sign_mm_hdr.RUN_date = ? AND sign_mm_hdr.fullbed = FALSE AND sign_mm_hdr.bedseq = ttArt.ttTempSeq 
-                    AND sign_mm_hdr.sides = ttart.ttsides AND sign_mm_hdr.matlType = ttArt.ttType AND (IF cItemseq <> "" THEN sign_mm_hdr.reprint = YES ELSE TRUE):
+                    AND sign_mm_hdr.sides = ttart.ttsides AND sign_mm_hdr.matlType = ttArt.ttType AND (IF cItemseq <> "" THEN sign_mm_hdr.reprint = TRUE ELSE TRUE):
                     IF sign_mm_hdr.inv_part <> ttart.ttinvpart THEN NEXT. /*must have save inv part number on bed*/
                     IF sign_mm_hdr.pt_hotfolderseq <> ttart.ttHotfolder THEN NEXT. /*cant run to diff print speeds at same time*/
                     IF tmpLog = TRUE THEN LEAVE.
@@ -3587,7 +3519,7 @@ PROCEDURE Grouping:
                                    b_mm_det.PointerSeq      = sign_mm_hdr.bedseq
                                    b_mm_det.switch          = ttArt.ttSwitch
                                    b_mm_det.pt_hotfolderseq = ttArt.ttHotFolder
-                                   b_mm_det.zzlog_1         = IF ttArt.ttCustNo = "53550" THEN YES ELSE NO
+                                   b_mm_det.zzlog_1         = IF ttArt.ttCustNo = "53550" THEN TRUE ELSE FALSE
                                    b_mm_det.reprintId       = ttArt.ttReprintId
                                    pCnt                     = pCnt + 1
                                    sign_mm_hdr.fullbed      = TRUE.
@@ -3622,8 +3554,8 @@ PROCEDURE Grouping:
                                        sign_mm_hdr.bedseq           = ttArt.ttTempSeq
                                        sign_mm_hdr.inv_part         = ttArt.ttInvPart
                                        sign_mm_hdr.qty              = 1
-                                       sign_mm_hdr.rerun            = IF cItemseq <> "" THEN YES ELSE NO
-                                       sign_mm_hdr.reprint          = IF cItemseq <> "" THEN YES ELSE NO
+                                       sign_mm_hdr.rerun            = IF cItemseq <> "" THEN TRUE ELSE FALSE
+                                       sign_mm_hdr.reprint          = IF cItemseq <> "" THEN TRUE ELSE FALSE
                                        sign_mm_hdr.pt_hotfolderseq  = ttArt.ttHotFolder
                                        pCnt                         = 1.
 
@@ -3645,7 +3577,7 @@ PROCEDURE Grouping:
                                    sign_mm_det.PointerSeq       = sign_mm_hdr.bedseq
                                    sign_mm_det.pt_hotfolderseq  = ttArt.ttHotFolder
                                    sign_mm_det.switch           = ttArt.ttSwitch
-                                   sign_mm_det.zzlog_1          = IF ttArt.ttCustNo = "53550" THEN YES ELSE NO
+                                   sign_mm_det.zzlog_1          = IF ttArt.ttCustNo = "53550" THEN TRUE ELSE FALSE
                                    sign_mm_det.POSITION         = pcnt
                                    sign_mm_det.reprintId        = ttArt.ttReprintId
                                    pCnt                         = pCnt + 1
@@ -3710,7 +3642,7 @@ PROCEDURE GroupingCorex:
            IF ttArt.ttQty < 1 AND INDEX(ttArt.ttType,"Corex") > 0 THEN DO:  
                FIND FIRST so_items NO-LOCK WHERE so_items.itemseq = ttArt.ttItemseq NO-ERROR.
                FIND FIRST so_file NO-LOCK WHERE so_file.so_no = so_items.so_no NO-ERROR.      
-               RUN ReportIssues(so_items.itemseq,"MM-Prime Center Fail - Qty",so_items.so_no,STRING(so_items.ITEM_no),"","Prime Center Fail - Qty","","","","").
+               RUN ReportIssues(so_items.itemseq,"MM-Prime Center Fail - Qty","Prime Center Fail - Qty").
                NEXT.
            END.
            
@@ -3796,11 +3728,11 @@ PROCEDURE GroupingCorex:
            FIND FIRST so_art NO-LOCK WHERE so_art.itemseq = ttArt.ttItemseq AND so_art.type = "mini" AND so_art.artfile = ENTRY(1,ttArt.ttFile) NO-ERROR.
            IF AVAIL so_art THEN DO:
                ALS = so_art.disp_order.
-               IF so_art.Date_Code <> "None" THEN DateCodeYN = YES.
+               IF so_art.Date_Code <> "None" THEN DateCodeYN = TRUE.
            END.
            ELSE DO:
                IF CAN-FIND(FIRST pt_det NO-LOCK WHERE pt_det.part_no = so_items.part_no
-                                                  AND LOOKUP(pt_det.datecodecolor,"White,Black") > 0) THEN DateCodeYN = YES. 
+                                                  AND LOOKUP(pt_det.datecodecolor,"White,Black") > 0) THEN DateCodeYN = TRUE. 
                
                IF CAN-FIND(FIRST zz_file NO-LOCK WHERE zz_file.zz_key1 = "SeqNumberLine" AND zz_file.zz_key2 = ttArt.ttPart) THEN DO:                                   
                    ALS = INT(SUBSTRING(ttArt.ttFile,R-INDEX(ttArt.ttFile,"-") + 1, LENGTH(ttArt.ttFile) - INDEX(ttArt.ttFile,".pdf") + 1)).
@@ -3987,7 +3919,7 @@ PROCEDURE GroupingCorex:
         FIND FIRST so_file NO-LOCK WHERE so_file.so_no = FailedSO NO-ERROR.
         FIND FIRST so_items NO-LOCK WHERE so_items.so_no = FailedSO AND so_items.item_no = INT(FailedNo) NO-ERROR.
         IF AVAIL so_file AND AVAIL so_items THEN DO:            
-            RUN ReportIssues(so_items.itemseq,"MM-Prime Center Fail",so_items.so_no,STRING(so_items.ITEM_no),"","Prime Center Fail","","","","").
+            RUN ReportIssues(so_items.itemseq,"MM-Prime Center Fail","Prime Center Fail").
         END.
         RELEASE so_file.
         RELEASE so_items.
@@ -4099,8 +4031,8 @@ PROCEDURE LogTT:
     CurDate = STRING(MONTH(TODAY)) + "-" + STRING(DAY(TODAY)) + "-" + STRING(YEAR(TODAY)) + ".md".
     
     CASE pSource:
-        WHEN 1 THEN TmpFile = "jmRptDet-" + cDBase + "-" + CurDate.
-        WHEN 2 THEN TmpFile = "jmTTArt-"  + cDBase + "-" + CurDate.
+        WHEN 1 THEN TmpFile = "\jmRptDet-" + cDBase + "-" + CurDate.
+        WHEN 2 THEN TmpFile = "\jmTTArt-"  + cDBase + "-" + CurDate.
     END CASE.
     
     IF TmpFile = "" THEN RETURN.
@@ -4117,11 +4049,13 @@ PROCEDURE LogTT:
     IF SEARCH(TmpFile) = ? THEN DO:
         OUTPUT STREAM S1 TO VALUE(TmpFile) APPEND.
         EXPORT STREAM S1 HdrList SKIP.
+        EXPORT STREAM S1 " " SKIP.
         OUTPUT STREAM S1 CLOSE.    
     END.
     ELSE DO:
         OUTPUT STREAM S1 TO VALUE(TmpFile) APPEND.
         EXPORT STREAM S1 ValueList SKIP.
+        EXPORT STREAM S1 "  " SKIP.
         OUTPUT STREAM S1 CLOSE.
     END.
     
@@ -4152,8 +4086,8 @@ PROCEDURE LogTTFull:
     CurDate = STRING(MONTH(TODAY)) + "-" + STRING(DAY(TODAY)) + "-" + STRING(YEAR(TODAY)) + ".md".
     
     CASE pSource:
-        WHEN 1 THEN TmpFile = "\jmRptDetFull-" + CurDate.
-        WHEN 2 THEN TmpFile = "\jmTTArtFull-"  + CurDate.
+        WHEN 1 THEN TmpFile = "\jmRptDetFull-" + cDBase + CurDate.
+        WHEN 2 THEN TmpFile = "\jmTTArtFull-"  + cDBase + CurDate.
     END CASE.
     ASSIGN TmpFile = cLogLoc + TmpFile
            TmpCnt  = 0.
@@ -4170,6 +4104,7 @@ PROCEDURE LogTTFull:
         hQuery:GET-NEXT.
         IF hQuery:QUERY-OFF-END THEN LEAVE.
         TmpCnt = TmpCnt + 1.
+        LogMsg = "".
         
         /* Get Table Headers */
         IF TmpCnt = 1 THEN DO:
@@ -4496,7 +4431,7 @@ PROCEDURE ProcessLayoutTag:
                                        sign_mm_det.due_date        = so_file.ship_by
                                        sign_mm_det.pt_hotfolderseq = IF AVAIL sign_mm_hdr THEN sign_mm_hdr.pt_hotfolderseq ELSE 0
                                        sign_mm_det.PointerSeq      = 1 
-                                       sign_mm_det.switch          = YES 
+                                       sign_mm_det.switch          = TRUE 
                                        sign_mm_det.zzlog_1         = FALSE. 
                                 
                                 /*get machine time*/
@@ -4564,11 +4499,11 @@ PROCEDURE ImageDiff:
     DEFINE INPUT  PARAMETER cNum AS INT NO-UNDO.
     DEFINE OUTPUT PARAMETER cLog AS LOG NO-UNDO.
 
-    cLog = NO. /*says there are no difference*/
+    cLog = FALSE. /*says there are no difference*/
     FIND b_mm_hdr NO-LOCK WHERE b_mm_hdr.batchseq = cNum NO-ERROR.
     IF AVAIL b_mm_hdr THEN DO:
         FOR EACH b_mm_det OF b_mm_hdr:
-            IF NUM-ENTRIES(b_mm_det.artfile,",") > 1 THEN cLog = YES. /*if more than one image have to assume they are different, thus need to send both sides*/ 
+            IF NUM-ENTRIES(b_mm_det.artfile,",") > 1 THEN cLog = TRUE. /*if more than one image have to assume they are different, thus need to send both sides*/ 
             IF cLog THEN LEAVE.
         END.
     END.
@@ -4613,13 +4548,13 @@ PROCEDURE PrintOrder:
 
 
     /*find last bedseq we were on so that we can rollover*/
-    lastbedseq = 0. bedfound = NO. bednums = "".
+    lastbedseq = 0. bedfound = FALSE. bednums = "".
     IF cItemseq = "" THEN DO:
          /*account for records left over from previous run*/
         ASSIGN mmCnt = 0.
            
         /*create run order based off of what section has oldest dates*/
-        FOR EACH sign_mm_hdr WHERE sign_mm_hdr.run_time = ? AND sign_mm_hdr.PartialRun = NO:
+        FOR EACH sign_mm_hdr WHERE sign_mm_hdr.run_time = ? AND sign_mm_hdr.PartialRun = FALSE:
             IF sign_mm_hdr.qty = sign_mm_hdr.qty_printed THEN NEXT. /*Just to make sure no old completed ones make it in*/
             dueDate = ?.
 
@@ -4631,7 +4566,7 @@ PROCEDURE PrintOrder:
             ELSE IF INDEX(sign_mm_hdr.matltype,"Magnetic")  > 0 THEN dueByType = "Magnetic".
             ELSE IF INDEX(sign_mm_hdr.matltype,"Vinyl")     > 0 THEN dueByType = "Vinyl".
 
-            FOR EACH sign_mm_det NO-LOCK WHERE sign_mm_det.batchseq = sign_mm_hdr.batchseq AND sign_mm_hdr.reprint = NO:
+            FOR EACH sign_mm_det NO-LOCK WHERE sign_mm_det.batchseq = sign_mm_hdr.batchseq AND sign_mm_hdr.reprint = FALSE:
                 /*set oldest date of each bed*/
                 IF sign_mm_det.due_date < dueDate OR dueDate = ? THEN dueDate = sign_mm_det.due_date.
 
@@ -4739,7 +4674,7 @@ PROCEDURE PrintOrder:
                 DO tLoop = 1 TO NUM-ENTRIES(polyBedNums):
                     FIND FIRST signbed NO-LOCK WHERE signbed.seq = int(ENTRY(tLoop,polyBedNums)) NO-ERROR.
                     IF AVAIL signbed THEN DO:
-                        FOR EACH sign_mm_hdr WHERE sign_mm_hdr.run_time = ? AND INDEX(matlType,"poly") > 0 AND sign_mm_hdr.PartialRun = NO AND sign_mm_hdr.reprint = NO AND sign_mm_hdr.bedseq = signbed.seq /*Partials First*/
+                        FOR EACH sign_mm_hdr WHERE sign_mm_hdr.run_time = ? AND INDEX(matlType,"poly") > 0 AND sign_mm_hdr.PartialRun = FALSE AND sign_mm_hdr.reprint = FALSE AND sign_mm_hdr.bedseq = signbed.seq /*Partials First*/
                              BY sign_mm_hdr.inv_part BY sign_mm_hdr.fullbed BY sign_mm_hdr.matlType /*BY sign_mm_hdr.sides*/ BY sign_mm_hdr.due_date:
                              
                             ASSIGN mmCnt              = mmCnt + 1
@@ -4749,7 +4684,7 @@ PROCEDURE PrintOrder:
                 END.
             END.
             ELSE IF CAN-DO("Corex,Alumalite,Omegabond,Decal,Magnetic",ENTRY(iLoop,bednums)) THEN DO:
-                FOR EACH sign_mm_hdr WHERE sign_mm_hdr.run_time = ? AND sign_mm_hdr.PartialRun = NO AND INDEX(matlType,ENTRY(iLoop,bednums)) > 0 AND sign_mm_hdr.reprint = NO /*Partials First*/
+                FOR EACH sign_mm_hdr WHERE sign_mm_hdr.run_time = ? AND sign_mm_hdr.PartialRun = FALSE AND INDEX(matlType,ENTRY(iLoop,bednums)) > 0 AND sign_mm_hdr.reprint = FALSE /*Partials First*/
                      BY sign_mm_hdr.inv_part BY sign_mm_hdr.fullbed BY sign_mm_hdr.matlType /*BY sign_mm_hdr.sides*/ BY sign_mm_hdr.due_date:
                     ASSIGN mmCnt              = mmCnt + 1
                            sign_mm_hdr.runseq = mmCnt * 10.
@@ -4759,7 +4694,7 @@ PROCEDURE PrintOrder:
             ELSE DO:
                 FIND FIRST signbed NO-LOCK WHERE signbed.seq = int(ENTRY(iLoop,bednums)) NO-ERROR.
                 IF AVAIL signbed THEN DO:
-                    FOR EACH sign_mm_hdr WHERE sign_mm_hdr.run_time = ? AND INDEX(matlType,"steel") > 0 AND sign_mm_hdr.PartialRun = NO AND sign_mm_hdr.bedseq = signbed.seq AND sign_mm_hdr.reprint = NO /*Partials First*/
+                    FOR EACH sign_mm_hdr WHERE sign_mm_hdr.run_time = ? AND INDEX(matlType,"steel") > 0 AND sign_mm_hdr.PartialRun = FALSE AND sign_mm_hdr.bedseq = signbed.seq AND sign_mm_hdr.reprint = FALSE /*Partials First*/
                          BY sign_mm_hdr.inv_part BY sign_mm_hdr.fullbed BY sign_mm_hdr.matlType /*BY sign_mm_hdr.sides*/ BY sign_mm_hdr.due_date:
                         ASSIGN mmCnt              = mmCnt + 1
                                sign_mm_hdr.runseq = mmCnt * 10.
@@ -4772,7 +4707,7 @@ PROCEDURE PrintOrder:
 
         /*add in the template runs*/
         tmpbed = "".
-        FOR EACH sign_mm_hdr NO-LOCK WHERE sign_mm_hdr.run_date = ? AND sign_mm_hdr.reprint = NO BREAK BY sign_mm_hdr.bedseq BY sign_mm_hdr.runseq:
+        FOR EACH sign_mm_hdr NO-LOCK WHERE sign_mm_hdr.run_date = ? AND sign_mm_hdr.reprint = FALSE BREAK BY sign_mm_hdr.bedseq BY sign_mm_hdr.runseq:
             IF FIRST-OF(sign_mm_hdr.bedseq) THEN DO:
 
             IF TRUE THEN DO:
@@ -4804,7 +4739,7 @@ PROCEDURE PrintOrder:
                         BUFFER-COPY sign_mm_hdr EXCEPT sign_mm_hdr.runseq sign_mm_hdr.batchseq TO b_mm_hdr.
                         ASSIGN b_mm_hdr.BATCHseq    = nextseq
                                b_mm_hdr.runseq      = sign_mm_hdr.runseq - 5
-                               b_mm_hdr.fullbed     = YES
+                               b_mm_hdr.fullbed     = TRUE
                                b_mm_hdr.sides       = 1
                                b_mm_hdr.qty         = 1
                                b_mm_hdr.matltype    = "Template". /*"Decal"*/
@@ -4860,18 +4795,17 @@ PROCEDURE PrintOrder:
     ELSE DO:
         /*find last reprint bed and put it after it and/or before all of normal beds*/
         mmCnt = 0.
-        FOR LAST sign_mm_hdr NO-LOCK WHERE sign_mm_hdr.run_date = ? AND sign_mm_hdr.PartialRun = NO AND sign_mm_hdr.runseq < 1000 BY sign_mm_hdr.runseq:
+        FOR LAST sign_mm_hdr NO-LOCK WHERE sign_mm_hdr.run_date = ? AND sign_mm_hdr.PartialRun = FALSE AND sign_mm_hdr.runseq < 1000 BY sign_mm_hdr.runseq:
             ASSIGN lastRunSeq = sign_mm_hdr.runseq.
             ASSIGN mmCnt = int(lastrunseq / 10) . 
         END.
 
         IF mmCnt < 30 THEN mmCnt = 30.
-        FOR EACH sign_mm_hdr WHERE sign_mm_hdr.RUN_date = ? AND sign_mm_hdr.rerun = YES:
+        FOR EACH sign_mm_hdr WHERE sign_mm_hdr.RUN_date = ? AND sign_mm_hdr.rerun = TRUE:
             RUN GET_mach_time (sign_mm_hdr.batchseq, sign_mm_hdr.bedseq,OUTPUT sign_mm_hdr.mach_time).
             ASSIGN mmCnt              = mmCnt + 1
                    sign_mm_hdr.runseq = mmCnt * 10.
             ASSIGN sign_mm_hdr.fbMachine = int(REPLACE(cItemSeq,"MACH","")) NO-ERROR.
-/*                    sign_mm_hdr.rerun  = NO. */
         END.
     END.
 
@@ -4964,7 +4898,7 @@ PROCEDURE Regroup:
                     IF sign_mm_hdr.reprint THEN NEXT.
                     DO WHILE sign_mm_hdr.fullbed = FALSE:
                         FIND FIRST b_mm_hdr WHERE b_mm_hdr.run_date = ? AND b_mm_hdr.fullbed = FALSE AND b_mm_hdr.bedseq = sign_mm_hdr.bedseq AND b_mm_hdr.sides = sign_mm_hdr.sides 
-                            AND b_mm_hdr.batchseq <> sign_mm_hdr.batchseq AND b_mm_hdr.inv_part = sign_mm_hdr.inv_part AND b_mm_hdr.pt_hotfolderseq = sign_mm_hdr.pt_hotfolderseq AND b_mm_hdr.reprint = NO NO-ERROR.
+                            AND b_mm_hdr.batchseq <> sign_mm_hdr.batchseq AND b_mm_hdr.inv_part = sign_mm_hdr.inv_part AND b_mm_hdr.pt_hotfolderseq = sign_mm_hdr.pt_hotfolderseq AND b_mm_hdr.reprint = FALSE NO-ERROR.
                         IF AVAIL b_mm_hdr THEN DO:
                             DO WHILE CAN-FIND(FIRST b_mm_det OF b_mm_hdr):
                                 FIND LAST sign_mm_det OF sign_mm_hdr NO-ERROR.
@@ -5001,9 +4935,9 @@ PROCEDURE Regroup:
     ELSE DO:
         DO iloop = 1 TO 2: /*picks up combinable partials on second pass*/ /*6/16/15*/
             FOR EACH signbed NO-LOCK:
-                FOR EACH sign_mm_hdr WHERE sign_mm_hdr.run_date = ? AND sign_mm_hdr.rerun = YES AND sign_mm_hdr.fullbed = FALSE AND sign_mm_hdr.bedseq = signbed.seq /*AND INDEX(sign_mm_hdr.matlType,"Corex") = 0*/ :
+                FOR EACH sign_mm_hdr WHERE sign_mm_hdr.run_date = ? AND sign_mm_hdr.rerun = TRUE AND sign_mm_hdr.fullbed = FALSE AND sign_mm_hdr.bedseq = signbed.seq /*AND INDEX(sign_mm_hdr.matlType,"Corex") = 0*/ :
                     DO WHILE sign_mm_hdr.fullbed = FALSE:
-                        FIND FIRST b_mm_hdr WHERE b_mm_hdr.run_date = ? AND b_mm_hdr.rerun = YES AND b_mm_hdr.fullbed = FALSE AND b_mm_hdr.bedseq = sign_mm_hdr.bedseq AND b_mm_hdr.sides = sign_mm_hdr.sides 
+                        FIND FIRST b_mm_hdr WHERE b_mm_hdr.run_date = ? AND b_mm_hdr.rerun = TRUE AND b_mm_hdr.fullbed = FALSE AND b_mm_hdr.bedseq = sign_mm_hdr.bedseq AND b_mm_hdr.sides = sign_mm_hdr.sides 
                             AND b_mm_hdr.batchseq <> sign_mm_hdr.batchseq AND b_mm_hdr.pt_hotfolderseq = sign_mm_hdr.pt_hotfolderseq AND b_mm_hdr.inv_part = sign_mm_hdr.inv_part NO-ERROR.
                         IF AVAIL b_mm_hdr THEN DO:
                             DO WHILE CAN-FIND(FIRST b_mm_det OF b_mm_hdr):
@@ -5164,7 +5098,7 @@ PROCEDURE RemoveFaults:
     
     
                 IF ttMat.ttQty < 0 AND ttMat.ttPart <> "CUSTOM MATERIAL" THEN DO:
-                    RUN ReportIssues(tmp_ttArt.ttItemseq,"MM-Not Enough Material",tmp_ttArt.ttso,STRING(tmp_ttArt.ttItemNO),"",ttMat.ttPart,"","","","").
+                    RUN ReportIssues(tmp_ttArt.ttItemseq,"MM-Not Enough Material",ttMat.ttPart).
                     RUN trimbeds(STRING(tmp_ttArt.ttItemseq)).
                     /*back out of material qty changes*/
                     FOR EACH ttchg:
@@ -5177,7 +5111,7 @@ PROCEDURE RemoveFaults:
             END.
         END.
         ELSE DO:
-            RUN ReportIssues(tmp_ttArt.ttItemseq,"MM-Not Enough Material",tmp_ttArt.ttso,STRING(tmp_ttArt.ttItemNO),"","Special Blanks - Alpha Order","","","","").
+            RUN ReportIssues(tmp_ttArt.ttItemseq,"MM-Not Enough Material","Special Blanks - Alpha Order").
             RUN trimbeds(STRING(tmp_ttArt.ttItemseq)).
         END.
     END.
@@ -5192,11 +5126,11 @@ PROCEDURE RemoveFIB:
     DEFINE OUTPUT PARAMETER anyStarted AS LOG  NO-UNDO.
 
 
-    anyStarted = NO.
+    anyStarted = FALSE.
     DO iLoop = 1 TO NUM-ENTRIES(pBatchList):
         FIND sign_mm_hdr NO-LOCK WHERE sign_mm_hdr.batchseq = int(ENTRY(iLoop,pBatchList)) NO-ERROR.
         IF AVAIL(sign_mm_hdr) THEN DO:
-            IF sign_mm_hdr.qty_printed > 0 OR sign_mm_hdr.run_time <> ? THEN anyStarted = YES.
+            IF sign_mm_hdr.qty_printed > 0 OR sign_mm_hdr.run_time <> ? THEN anyStarted = TRUE.
         END.
     END.
 
@@ -5347,7 +5281,7 @@ PROCEDURE Renumber:
      END.
 
     /*half or full sheet?*/
-    maxPos = 0. useHalf = NO. lastCol = 0. numPos = 0.
+    maxPos = 0. useHalf = FALSE. lastCol = 0. numPos = 0.
     FIND b_mm_hdr NO-LOCK WHERE b_mm_hdr.batchseq = cBed NO-ERROR.
     IF AVAIL b_mm_hdr THEN DO:
         FOR LAST b_mm_det OF b_mm_hdr BY b_mm_det.POSITION:
@@ -5357,11 +5291,11 @@ PROCEDURE Renumber:
                 LastCol = NumPos / 2.
                 
                 IF lastCol < 1 THEN DO: /*only 1 position*/
-                    useHalf = NO.
+                    useHalf = FALSE.
                     LEAVE.
                 END.
                 IF lastCol = 1 THEN DO: /*only 2 position*/
-                    useHalf = YES.
+                    useHalf = TRUE.
                     LEAVE.
                 END.
                 
@@ -5369,7 +5303,7 @@ PROCEDURE Renumber:
                 ELSE IF LastCol MODULO 2 = 1 THEN lastCol = lastCol - 1.
 
                 maxPos = lastCol * buf_signbed.userdec2. /*largest position in that coloumn*/
-                useHalf = IF b_mm_det.POSITION > maxPos THEN NO ELSE YES.
+                useHalf = IF b_mm_det.POSITION > maxPos THEN NO ELSE TRUE.
             END.
         END.
     END.
@@ -5469,20 +5403,20 @@ PROCEDURE Resets:
     IF pPurge = TRUE THEN DO: /*reset records so they delete*/
         FOR EACH sign_mm_hdr WHERE sign_mm_hdr.RUN_date = ? BY sign_mm_hdr.runseq:
             IF sign_mm_hdr.qty_printed > 0 THEN 
-                ASSIGN sign_mm_hdr.SAVE_bed = YES. /* save beds in progress */
+                ASSIGN sign_mm_hdr.SAVE_bed = TRUE. /* save beds in progress */
             ELSE IF sign_mm_hdr.reprint THEN
-                ASSIGN sign_mm_hdr.SAVE_bed = YES. /* save reprints */
+                ASSIGN sign_mm_hdr.SAVE_bed = TRUE. /* save reprints */
             ELSE 
-                ASSIGN sign_mm_hdr.save_bed = NO. /* reset all other batches */
+                ASSIGN sign_mm_hdr.save_bed = FALSE. /* reset all other batches */
             
             /* Default Corex batches to be deleted to maximize PC beds */    
-            IF INDEX(sign_mm_hdr.matltype,"Corex") > 0 THEN sign_mm_hdr.save_bed = NO.
+            IF INDEX(sign_mm_hdr.matltype,"Corex") > 0 THEN sign_mm_hdr.save_bed = FALSE.
         END.
     END.
     ELSE DO:
         FOR EACH sign_mm_hdr WHERE sign_mm_hdr.RUN_date = ? BY sign_mm_hdr.runseq:
             IF sign_mm_hdr.matltype <> "template" THEN DO:
-                SaveFlag = NO.
+                SaveFlag = FALSE.
                 FOR EACH sign_mm_det OF sign_mm_hdr NO-LOCK BREAK BY sign_mm_det.itemseq:
                     IF LAST-OF(sign_mm_det.itemseq) THEN DO:
     
@@ -5492,31 +5426,31 @@ PROCEDURE Resets:
                             FIND so_file NO-LOCK WHERE so_file.so_no = so_items.so_no NO-ERROR.
                             /*have we ran all of them?*/
                             RUN getQty (so_items.itemseq, OUTPUT qtyRan, OUTPUT qtyNeeded, OUTPUT inQueue).
-                            IF qtyNeeded < 0 THEN SaveFlag = YES.
+                            IF qtyNeeded < 0 THEN SaveFlag = TRUE.
     
                             /*has it been marked complete?*/
                             IF CAN-FIND(FIRST h_detail NO-LOCK WHERE h_detail.order_no = so_items.so_no 
                                                                  AND h_detail.ITEM_no  = STRING(so_items.ITEM_no) 
                                                                  AND h_detail.activity = "D11" 
-                                                                 AND h_detail.zzLog_1  = YES) THEN SaveFlag = YES.
+                                                                 AND h_detail.zzLog_1  = TRUE) THEN SaveFlag = TRUE.
 
-                            IF so_items.ord_status <> 5 THEN SaveFlag = YES.
+                            IF so_items.ord_status <> 5 THEN SaveFlag = TRUE.
 
-                            IF AVAIL(so_file) AND so_file.hold <> "" THEN SaveFlag = YES.
+                            IF AVAIL(so_file) AND so_file.hold <> "" THEN SaveFlag = TRUE.
                         END.
-                        ELSE SaveFlag = YES.
+                        ELSE SaveFlag = TRUE.
                     END.
                 END.
             END.
-            ELSE SaveFlag = YES.
+            ELSE SaveFlag = TRUE.
 
             /*keep full beds and reprints*/
-            IF (sign_mm_hdr.fullbed = YES AND SaveFlag = NO) 
-            OR sign_mm_hdr.reprint  = YES THEN sign_mm_hdr.save_bed = YES.
-            ELSE sign_mm_hdr.SAVE_bed = NO.
+            IF (sign_mm_hdr.fullbed = TRUE AND SaveFlag = FALSE) 
+            OR sign_mm_hdr.reprint  = TRUE THEN sign_mm_hdr.save_bed = TRUE.
+            ELSE sign_mm_hdr.SAVE_bed = FALSE.
             
             /* Default Corex batches to be deleted to maximize PC beds */     
-            IF INDEX(sign_mm_hdr.matltype,"Corex") > 0 THEN sign_mm_hdr.save_bed = NO.
+            IF INDEX(sign_mm_hdr.matltype,"Corex") > 0 THEN sign_mm_hdr.save_bed = FALSE.
         END.
     END.
 
@@ -5529,7 +5463,7 @@ PROCEDURE Resets:
     FOR EACH sign_mm_hdr WHERE sign_mM_hdr.RUN_date = ?:
         ASSIGN DelBatch = TRUE.
                
-        IF sign_mm_hdr.SAVE_bed = YES THEN DelBatch = FALSE. 
+        IF sign_mm_hdr.SAVE_bed = TRUE THEN DelBatch = FALSE. 
         IF CAN-FIND (FIRST sign_mm_det WHERE sign_mm_det.batchseq = sign_mm_hdr.batchseq 
                                          AND sign_mm_det.itemseq  = 0) THEN DelBatch = TRUE.
         
@@ -5579,7 +5513,7 @@ PROCEDURE RuleOfOne:
     IF AVAIL b_signbed THEN DO:
         FIND LAST b_mm_det NO-LOCK WHERE b_mm_det.batchseq = batchno NO-ERROR.
         IF (b_signbed.userdec1 * b_signbed.userdec2) - 1 = b_mm_det.POSITION THEN
-            ASSIGN c_ok = YES.
+            ASSIGN c_ok = TRUE.
     END.
 END PROCEDURE.
 
@@ -5894,7 +5828,7 @@ PROCEDURE TrimBeds:
         DO WHILE CAN-FIND(FIRST sign_mm_hdr WHERE sign_mm_hdr.qty_printed = 0 AND sign_mm_hdr.fullbed = FALSE):
             FOR EACH sign_mm_hdr WHERE sign_mm_hdr.qty_printed = 0 AND sign_mm_hdr.fullbed = FALSE:
                 RUN RuleOfOne(sign_mm_hdr.bedseq, sign_mm_hdr.batchseq, OUTPUT c_ok).
-                IF c_ok = YES THEN DO:
+                IF c_ok = TRUE THEN DO:
                     ASSIGN sign_mm_hdr.fullbed = TRUE.
                     NEXT.
                 END.
@@ -6068,7 +6002,6 @@ PROCEDURE ZundRotate:
                c_msg     = cResponse + CHR(10) + CHR(10) + "File= " + cInputFile.
                
         RUN mgemail.p ("Bullseye Database",c_to_addr,"","",c_subject,c_msg,"",FALSE).
-        RUN ReportIssues("","MM-XML Not Successful","","","","",(IF AVAIL sign_mm_hdr THEN STRING(sign_mm_hdr.batchseq) ELSE ""),"",xmldata,cResponse).
     END.
 END PROCEDURE.
 
@@ -6094,7 +6027,7 @@ PROCEDURE ZZ_Control:
     RUN progList.p(OUTPUT ProgramList).
     
     /*does this come from bgmm or mm-look?*/
-    IsPrimary = IF INDEX(ProgramList,"mm-look") = 0 THEN YES ELSE NO.
+    IsPrimary = IF INDEX(ProgramList,"mm-look") = 0 THEN TRUE ELSE NO.
 
     IF pDel = FALSE THEN DO: /*creating*/
         CASE pKey2:

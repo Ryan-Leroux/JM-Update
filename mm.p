@@ -10,9 +10,9 @@ DEFINE VARIABLE WorkDate      AS DATE   NO-UNDO.
 {mm.i "NEW"}
 
 SESSION:SUPPRESS-WARNINGS = YES.
-RUN mm-pp.p PERSISTENT SET hMM-PP. 
+RUN "F:\Dev\JM Update\JM-Update\mm-pp.p" PERSISTENT SET hMM-PP. 
 
-RUN LogIt IN hMM-PP (1,"Start MM.p","","","").
+RUN LogIt IN hMM-PP (1,"Start MM.p").
 
 /******************* Main **********************/
 RUN CanIRun         IN hMM-PP ("Start", OUTPUT CanRun).
@@ -28,22 +28,23 @@ ELSE DO:
 
     RUN workdays.p (TODAY,365,OUTPUT WorkDate).
 
+    
     FOR EACH so_file NO-LOCK WHERE so_file.site = "7" 
                                AND so_file.ship_by <= WorkDate BY so_file.ship_by:
         FOR EACH so_items NO-LOCK OF so_file WHERE so_items.ord_status = 5:
-            /*create report info*/
-            RUN RptDet  IN hMM-PP (so_items.itemseq,so_items.so_no,so_items.ITEM_no).
-            RUN Checks  IN hMM-PP (so_items.so_no,so_items.ITEM_no,OUTPUT IsProdReady).
+            RUN CreateRptDet  IN hMM-PP (so_items.itemseq,so_items.so_no,so_items.ITEM_no).
+            RUN Checks        IN hMM-PP (so_items.so_no,so_items.ITEM_no,OUTPUT IsProdReady).
             IF IsProdReady = YES THEN RUN BuildTT IN hMM-PP (so_items.so_no,so_items.ITEM_no).
         END.
     END.
     RUN LogIt        IN hMM-PP (1,"Procedure:Buildtt = Finished").
 
+    /*
     RUN CheckImages  IN hMM-PP ("").
     RUN LogIt        IN hMM-PP (1,"Procedure:CheckImages = Finished").
 
     RUN RemoveFaults IN hMM-PP.
-    RUN LogIt        IN hMM-PP (1,"Procedure:RemoveFaults = Finished","","","").
+    RUN LogIt        IN hMM-PP (1,"Procedure:RemoveFaults = Finished").
     
     /*Corex Batching Code*/
     RUN DelCorexPC    IN hMM-PP ("").
@@ -88,13 +89,18 @@ ELSE DO:
 
     /*clean up*/
     RUN ReleaseAll   IN hMM-PP.
+    */
+    
+    RUN CanIRun IN hMM-PP ("Close",OUTPUT CanRun).
+    RUN LogIt   IN hMM-PP (1,"CanIRun: " + STRING(CanRun)).
+    
+    /*RUN LogIt   IN hMM-PP (1,"Log ttArt").
+    FOR EACH ttArt:
+        hTable = BUFFER ttArt:HANDLE.
+        RUN LogTT IN hMM-PP (2,hTable).
+    END.*/
 
-
-    OUTPUT TO VALUE(SESSION:TEMP-DIR + "ttArt.d").
-    FOR EACH ttArt: EXPORT ttArt. END.
-    OUTPUT CLOSE.
-
-    RUN ExportRptDet      IN hMM-PP.
+    /*RUN ExportRptDet      IN hMM-PP.*/
 
      /****************** End Main *******************/
  END.

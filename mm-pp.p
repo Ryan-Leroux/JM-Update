@@ -57,7 +57,7 @@ DEFINE TEMP-TABLE idet
     FIELD iName     AS CHAR
     FIELD iPathway  AS CHAR.
 
-DEFINE TEMP-TABLE rpt_det
+DEFINE TEMP-TABLE ttRpt_Det
     FIELD itemseq AS INT
     FIELD so_no   AS CHAR
     FIELD ITEM_no AS INT
@@ -113,6 +113,7 @@ DEFINE TEMP-TABLE logs
     FIELD lResponse   AS CHAR.
 
 DEFINE TEMP-TABLE tempDet LIKE sign_mm_det.
+
 DEFINE TEMP-TABLE tempHdr LIKE nest_mm_hdr
     FIELD order AS INTEGER .
 
@@ -931,127 +932,151 @@ END PROCEDURE.
 
 
 PROCEDURE Checks:
-    DEFINE INPUT PARAMETER cSo   AS CHAR NO-UNDO.
-    DEFINE INPUT PARAMETER cItem AS INT  NO-UNDO.
-    DEFINE OUTPUT PARAMETER c_ok AS LOG  NO-UNDO INITIAL NO.
+/*------------------------------------------------------------------------------
+ Purpose: Verify that the item has all data necessary 
+          and is marked "ready for production"
+ 
+ INPUTS: pSo        -> Current SO #
+         pItemNo    -> Current Item #
+         oProdReady -> Is this item ready for production? (Y/N)
+ 
+ Notes:
+------------------------------------------------------------------------------*/
+    DEFINE INPUT  PARAMETER pSo             AS CHAR NO-UNDO.
+    DEFINE INPUT  PARAMETER pItemNo         AS INT  NO-UNDO.
+    DEFINE OUTPUT PARAMETER oProdReady      AS LOG  NO-UNDO INITIAL NO.
 
-    DEFINE VARIABLE holdit       AS LOG  NO-UNDO INITIAL NO.
-    DEFINE VARIABLE tmpHours     AS DEC  NO-UNDO.
-    DEFINE VARIABLE foundHDR     AS LOG  NO-UNDO.
-    DEFINE VARIABLE activities   AS CHAR NO-UNDO.
-    DEFINE VARIABLE foundDig     AS LOG  NO-UNDO.
-    DEFINE VARIABLE tmpBatch     AS CHAR NO-UNDO.
-    DEFINE VARIABLE tmpQty       AS INT  NO-UNDO.
-    DEFINE VARIABLE tmpint       AS INT  NO-UNDO.
-    DEFINE VARIABLE totalHours   AS DEC  NO-UNDO.
-    DEFINE VARIABLE totalDays    AS DEC  NO-UNDO.
-    DEFINE VARIABLE startDate    AS DATE NO-UNDO.
-    DEFINE VARIABLE isPoly       AS LOG  NO-UNDO.
-    DEFINE VARIABLE qtyRan       AS INT  NO-UNDO.
-    DEFINE VARIABLE qtyNeeded    AS INT  NO-UNDO.
-    DEFINE VARIABLE inQueue      AS LOG  NO-UNDO.
+    DEFINE VARIABLE ActivityList            AS CHAR NO-UNDO.    
+    DEFINE VARIABLE TotalHours              AS DEC  NO-UNDO.
+    DEFINE VARIABLE TotalDays               AS DEC  NO-UNDO.
+    DEFINE VARIABLE StartDate               AS DATE NO-UNDO.
+    DEFINE VARIABLE QtyRan                  AS INT  NO-UNDO.
+    DEFINE VARIABLE QtyNeeded               AS INT  NO-UNDO.
+    DEFINE VARIABLE InQueue                 AS LOG  NO-UNDO.
 
-    FIND so_items NO-LOCK WHERE so_items.so_no = cSo AND so_items.ITEM_no = cITem NO-ERROR.
-    FIND so_file NO-LOCK WHERE so_file.so_no = cSo NO-ERROR.
-    IF NOT AVAIL so_items OR NOT AVAIL so_file THEN NEXT.
+    FIND so_items NO-LOCK WHERE so_items.so_no = pSo AND so_items.ITEM_no = pItemNo NO-ERROR.
+    FIND so_file NO-LOCK WHERE so_file.so_no = pSo NO-ERROR.
+    IF NOT AVAIL so_items OR NOT AVAIL so_file THEN NEXT.        
      
-
+    RUN LogIt(5,"Procedure Checks(" + pSo + "," + STRING(pItemNo) + "): Start").
+    
+    /* Unable to print items on hold */
     IF so_file.hold <> "" THEN DO: 
-        /*cant print any records with a hold on it. Example: PENDCR or CUSTHOLD*/
-        RUN reportIssues(so_items.itemseq,"MM-Checks: Hold",so_items.so_no,STRING(so_items.ITEM_no),"",so_file.hold,"","","","").
+        RUN ReportIssues(so_items.itemseq,"Checks:Hold",so_file.hold).
+        oProdReady = FALSE.
+        RETURN.
     END.
 
-    /*exclude parts on exclusion list - these can be anything from screen printed parts to special charge line items such as 90SC*/
-    IF CAN-FIND(FIRST zz_file NO-LOCK WHERE zz_file.zz_key1 = "MM-ExcludePart" AND zz_file.zz_key2 = so_items.part_no) THEN DO: 
-        RUN reportIssues(so_items.itemseq,"MM-Checks: Not Running Through JM",so_items.so_no,STRING(so_items.ITEM_no),"","Excluded Part","","","","").
-    END.
-
-   /*agent_sart is a next day rider/item*/ /*this check evaluates all digitally printed options and if it doesnt meet any of the options it removes it, has to be sart/dart/stock/custom to print*/
-    IF NOT CAN-FIND(FIRST pt_det WHERE pt_det.part_no = so_items.part_no AND pt_det.agent_sart = TRUE) AND NOT CAN-FIND(FIRST pt_det WHERE pt_det.part_no = so_items.part_no AND pt_det.dart_item = TRUE) THEN DO:
+   /*agent_sart = next day rider/item*/ 
+   /*this check evaluates all digitally printed options and if it doesnt meet any of the options 
+     it removes it, has to be sart/dart/stock/custom to print*/
+    IF  NOT CAN-FIND(FIRST pt_det WHERE pt_det.part_no = so_items.part_no AND pt_det.agent_sart = TRUE) 
+    AND NOT CAN-FIND(FIRST pt_det WHERE pt_det.part_no = so_items.part_no AND pt_det.dart_item = TRUE) THEN DO:
         IF NOT CAN-FIND(FIRST so_art WHERE so_art.itemseq = so_items.itemseq AND so_art.TYPE = "Mini") THEN DO:
             IF NOT CAN-FIND(FIRST pt_det WHERE pt_det.part_no = so_items.part_no AND pt_det.stk_rider = TRUE) THEN DO: 
-                IF NOT CAN-FIND(FIRST pt_det WHERE pt_det.part_no = so_items.part_no AND pt_det.zzlog_3 = TRUE) THEN DO: /*check to see if stockfile is selected - zz_log3 means stock file*/
-                    RUN reportIssues(so_items.itemseq,"MM-Checks: Not Sart/Dart/Stock/Custom",so_items.so_no,STRING(so_items.ITEM_no),"","","","","","").
+                IF NOT CAN-FIND(FIRST pt_det WHERE pt_det.part_no = so_items.part_no AND pt_det.zzlog_3 = TRUE) THEN DO: /*zz_log3 means stock file*/
+                    RUN ReportIssues(so_items.itemseq,"Checks:Not Sart/Dart/Stock/Custom","").
+                    oProdReady = FALSE.
+                    RETURN.
                 END.
             END.
         END.
     END.
 
     /*make sure print digital and all prior activities have been completed*/
-    c_ok       = NO. 
-    totalHours = 0.
-    isPoly     = YES.
-    FOR EACH squ_ptdet NO-LOCK WHERE squ_ptdet.itemseq = so_items.itemseq AND squ_ptdet.TYPE <> "Frame",
+    ASSIGN oProdReady = FALSE 
+           TotalHours = 0.
+    FOR EACH squ_ptdet NO-LOCK WHERE squ_ptdet.itemseq = so_items.itemseq 
+                                 AND squ_ptdet.TYPE <> "Frame",
         EACH squ_act NO-LOCK OF squ_ptdet BY squ_act.order:
-        IF squ_act.ActSeq = 8 THEN ASSIGN c_ok = YES. /*actseq = 8 is printing digital*/
-        IF NOT CAN-DO(activities,STRING(squ_act.actseq)) AND c_ok = NO THEN /*anything before the printing digital activity*/
-            ASSIGN activities = activities + (IF activities = "" THEN "" ELSE ",") + string(squ_act.actseq).
+        
+        /*actseq = 8 is printing digital*/    
+        IF squ_act.ActSeq = 8 THEN ASSIGN oProdReady = TRUE. 
+        
+        /*anything before the printing digital activity*/
+        IF LOOKUP(STRING(squ_act.ActSeq),ActivityList) = 0 AND oProdReady = FALSE THEN 
+            ASSIGN ActivityList = ActivityList + (IF ActivityList = "" THEN "" ELSE ",") + STRING(squ_act.actseq).
 
-        IF INDEX(squ_ptdet.pt_substrate,"poly") > 0 THEN isPoly = YES. /*might be bug because isPoly will never be no*/
-        totalHours = totalHours + squ_act.hours[1].
+        TotalHours = TotalHours + squ_act.hours[1].
     END.
-    IF isPoly THEN totalHours = totalHours + 12.
-    IF c_ok = YES AND NUM-ENTRIES(activities,",") > 0 THEN DO: /*activities is all the actseq's that happen before printing digital*/
-        FIND FIRST actlist NO-LOCK WHERE actlist.actseq = INT(ENTRY(NUM-ENTRIES(activities),activities)) NO-ERROR.
+    
+    IF oProdReady = TRUE AND NUM-ENTRIES(ActivityList,",") > 0 THEN DO: 
+        FIND FIRST actlist NO-LOCK WHERE actlist.actseq = INT(ENTRY(NUM-ENTRIES(ActivityList),ActivityList)) NO-ERROR.
         IF AVAIL actlist THEN DO:
-            IF NOT CAN-FIND(FIRST h_detail NO-LOCK WHERE H_detail.activity = actlist.labor_type AND H_detail.item_no = string(so_items.ITEM_no) 
-                AND H_detail.order_no = so_items.so_no AND H_detail.zzlog_1 = TRUE) THEN c_ok = NO. /*if can't find completed record for last activity before digital print then next*/
+            /*if can't find completed record for last activity before digital print then next*/
+            IF NOT CAN-FIND(FIRST h_detail NO-LOCK WHERE H_detail.activity = actlist.labor_type 
+                                                     AND H_detail.item_no  = STRING(so_items.ITEM_no) 
+                                                     AND H_detail.order_no = so_items.so_no 
+                                                     AND H_detail.zzlog_1 = TRUE) THEN oProdReady = FALSE. 
         END.
     END.
-    IF c_ok = NO THEN DO:
-        RUN reportIssues(so_items.itemseq,"MM-Checks: Not Completed Prior Activity",so_items.so_no,STRING(so_items.ITEM_no),"",IF AVAIL actlist THEN ActList.ActDesc ELSE "","","","","").
+    
+    IF oProdReady = FALSE THEN DO:
+        RUN reportIssues(so_items.itemseq,"Checks:Not Completed Prior Activity",IF AVAIL actlist THEN ActList.ActDesc ELSE "").
+        RETURN.
     END.
-    c_ok = NO.
+    ELSE oProdReady = FALSE.
 
     /* is it close enough to firm date to run? */
     IF so_file.firm THEN DO:
         /* How many days worth of time do we still have to do? */
-        ASSIGN totalDays = 2 + IF totalHours / 8 = int(totalHours / 8) THEN totalHours / 8
-                           ELSE TRUNCATE(totalHours / 8,0) + 1
-               startDate = so_file.ship_by.
-        DO WHILE totalDays > 0:
-            startDate = startDate - 1.
-            IF NOT CAN-DO("1,7",STRING(WEEKDAY(startDate)))
-            AND NOT CAN-FIND(holiday WHERE holiday.hol_date = startDate)
-            THEN totalDays = totalDays - 1.
+        ASSIGN TotalDays = 2 + IF TotalHours / 8 = INT(TotalHours / 8) THEN TotalHours / 8
+                           ELSE TRUNCATE(TotalHours / 8,0) + 1
+               StartDate = so_file.ship_by.
+        DO WHILE TotalDays > 0:
+            StartDate = StartDate - 1.
+            IF LOOKUP(STRING(WEEKDAY(StartDate)),"1,7") = 0 
+            AND NOT CAN-FIND(holiday WHERE holiday.hol_date = StartDate) THEN TotalDays = TotalDays - 1.
         END.
 
-        IF startDate > TODAY THEN DO: /*if the ship is too far out, we dont need to print yet and we can wait*/
-            RUN reportIssues(so_items.itemseq,"MM-Checks: Firm Date",so_items.so_no,STRING(so_items.ITEM_no),"","Too far out to run","","","","").
+        /*if the ship is too far out, we dont need to print yet and we can wait*/
+        IF StartDate > TODAY THEN DO: 
+            RUN ReportIssues(so_items.itemseq,"Checks:Firm Date","Too Far Out to Run").
+            oProdReady = FALSE.
+            RETURN.
         END.
     END.
    
-/*     /*see if its already printed*/                                                                           */
-    RUN getQty(so_items.itemseq,OUTPUT qtyRan,OUTPUT qtyNeeded, OUTPUT inQueue).
-    IF qtyNeeded <= 0 THEN DO:
-        IF inQueue THEN
-            RUN reportIssues(so_items.itemseq,"MM-Checks: Queue",so_items.so_no,STRING(so_items.ITEM_no),"","","","","","").
-        ELSE
-            RUN reportIssues(so_items.itemseq,"MM-Checks: Already Printed Via JM",so_items.so_no,STRING(so_items.ITEM_no),"","","","","","").
+    /*see if its already printed*/  
+    RUN GetQty(so_items.itemseq,OUTPUT QtyRan,OUTPUT QtyNeeded, OUTPUT InQueue).
+    IF QtyNeeded <= 0 THEN DO:
+        RUN ReportIssue(so_items.itemseq,IF InQueue THEN "Checks:Queue" ELSE "Checks:Already Printed Via JM","").
+        oProdReady = FALSE.
+        RETURN.
     END.
          
-    /*if manually printed*/
-    IF CAN-FIND(FIRST h_detail NO-LOCK WHERE h_detail.order_no = so_items.so_no AND h_detail.ITEM_no = string(so_items.ITEM_no) AND h_detail.activity = "D11" AND h_detail.batchseq = "") THEN DO: 
-        RUN reportIssues(so_items.itemseq,"MM-Checks: Already Printed",so_items.so_no,STRING(so_items.ITEM_no),"","","","","","").
+    /*Manually printed*/
+    IF CAN-FIND(FIRST h_detail NO-LOCK WHERE h_detail.order_no = so_items.so_no 
+                                         AND h_detail.ITEM_no  = STRING(so_items.ITEM_no) 
+                                         AND h_detail.activity = "D11" 
+                                         AND h_detail.batchseq = "") THEN DO: 
+        RUN ReportIssues(so_items.itemseq,"Checks:Already Printed","").
+        oProdReady = FALSE.
+        RETURN.
     END.
 
-    /*if activity already marked complete*/
-    IF CAN-FIND(FIRST h_detail NO-LOCK WHERE h_detail.order_no = so_items.so_no AND h_detail.ITEM_no = STRING(so_items.ITEM_no) AND h_detail.activity = "D11" AND h_detail.zzLog_1 = YES) THEN DO:
+    /*Activity already marked complete*/
+    IF CAN-FIND(FIRST h_detail NO-LOCK WHERE h_detail.order_no = so_items.so_no 
+                                         AND h_detail.ITEM_no  = STRING(so_items.ITEM_no) 
+                                         AND h_detail.activity = "D11" 
+                                         AND h_detail.zzLog_1  = YES) THEN DO:
         IF NOT CAN-FIND(FIRST sign_mm_reprint NO-LOCK WHERE sign_mm_reprint.itemseq = so_items.itemseq AND sign_mm_reprint.completed = FALSE) THEN DO:
-            RUN reportIssues(so_items.itemseq,"MM-Checks: Already Printed Via JM",so_items.so_no,STRING(so_items.ITEM_no),"","","","","","").
+            RUN ReportIssues(so_items.itemseq,"Checks:Already Printed Via JM","").
+            oProdReady = FALSE.
+            RETURN.
         END.
     END.
 
     /* fail safe - if it makes it here and has already shipped then we don't want to reprint it*/
-    IF CAN-FIND(FIRST h_detail NO-LOCK WHERE h_detail.order_no = so_items.so_no AND h_detail.ITEM_no = STRING(so_items.ITEM_no) AND h_detail.activity = "S2")
-        OR CAN-FIND(FIRST h_detail NO-LOCK WHERE h_detail.order_no = so_items.so_no AND h_detail.ITEM_no = STRING(so_items.ITEM_no) AND h_detail.activity = "S3") THEN DO:
-            RUN reportIssues(so_items.itemseq,"MM-Checks: Already Printed",so_items.so_no,STRING(so_items.ITEM_no),"","","","","","").
+    IF CAN-FIND(FIRST h_detail NO-LOCK WHERE h_detail.order_no = so_items.so_no 
+                                         AND h_detail.ITEM_no  = STRING(so_items.ITEM_no) 
+                                         AND LOOKUP(h_detail.activity,"S2,S3") > 0) THEN DO:
+            RUN ReportIssues(so_items.itemseq,"Checks:Already Printed","").
+            oProdReady = FALSE.
+            RETURN.
     END.
     
-
-    c_ok = YES.
-    IF AVAIL sign_mm_det THEN RELEASE sign_mm_det.
-    IF AVAIL sign_mm_hdr THEN RELEASE sign_mm_hdr.
+    oProdReady = YES.
 
 END PROCEDURE.
 
@@ -1690,8 +1715,8 @@ PROCEDURE Email:
                          "Reason Item" .
 
    
-    FOR EACH rpt_det:
-        FIND so_items NO-LOCK WHERE so_items.itemseq = rpt_det.itemseq NO-ERROR.
+    FOR EACH ttRpt_Det:
+        FIND so_items NO-LOCK WHERE so_items.itemseq = ttRpt_Det.itemseq NO-ERROR.
         IF NOT AVAIL so_items THEN NEXT.
         FIND so_file  NO-LOCK WHERE so_file.so_no = so_items.so_no     NO-ERROR.
         FIND pt_det   NO-LOCK WHERE pt_det.part_no = so_items.part_no  NO-ERROR.
@@ -1701,10 +1726,14 @@ PROCEDURE Email:
             IF so_items.ship_qty = so_items.orderqty THEN NEXT.
             IF NOT AVAIL(pt_det) THEN NEXT. /*ex. 90SC*/
             IF NOT CAN-FIND(FIRST squ_act WHERE squ_act.subseq = squ_ptdet.subseq AND squ_act.ActSeq = 8) THEN NEXT. 
-            IF rpt_det.issue MATCHES "*Not Sart/Dart/Stock/Custom*" THEN NEXT.
-            tmpchar = "". tmpissue = "".  tmpint = 0. tmpRack = "".
-            tmpIssue = /* IF num-entries(rpt_det.issue,"|") > 1 THEN "Multiple" ELSE */ rpt_det.issue.
-            ASSIGN tmpissue = REPLACE(tmpissue,"MM-","").
+            IF ttRpt_Det.issue MATCHES "*Not Sart/Dart/Stock/Custom*" THEN NEXT.
+            
+            ASSIGN tmpchar  = ""
+                   tmpissue = "" 
+                   tmpint   = 0
+                   tmpRack  = ""
+                   tmpIssue = ttRpt_Det.issue.
+                   tmpissue = REPLACE(tmpissue,"MM-","").
     
             /*if in queue then set to blank so it pulls info for report*/
             IF INDEX(tmpissue,"Queue") > 0 THEN ASSIGN tmpIssue = "".
@@ -1768,15 +1797,15 @@ PROCEDURE Email:
             IF tmpIssue MATCHES "*Checks:*" THEN DO:
                 tmpIssue = REPLACE(tmpIssue,"Checks: ","").
             END.
-            IF tmpChar = "" THEN DO:
-                tmpChar = rpt_det.reason.
-            END.
+            
+            IF tmpChar = "" THEN tmpChar = ttRpt_Det.reason.
+            
             IF tmpIssue MATCHES "*Art Image Issue*" THEN DO:
-                IF CAN-FIND(FIRST zz_file WHERE zz_file.zz_key1 = "BG-TRUEVIEW" AND zz_file.zz_key2 = string(rpt_det.itemseq)) THEN DO:
+                IF CAN-FIND(FIRST zz_file WHERE zz_file.zz_key1 = "BG-TRUEVIEW" AND zz_file.zz_key2 = STRING(ttRpt_Det.itemseq)) THEN DO:
                     ASSIGN tmpChar = "Art Queued for Creation".
                 END.
                 ELSE DO: 
-                    FIND FIRST zz_file NO-LOCK WHERE zz_file.zz_key1 = "BG-TRUEVIEW-PROCESSED" AND zz_file.zz_key2 = string(rpt_det.itemseq) NO-ERROR.
+                    FIND FIRST zz_file NO-LOCK WHERE zz_file.zz_key1 = "BG-TRUEVIEW-PROCESSED" AND zz_file.zz_key2 = STRING(ttRpt_Det.itemseq) NO-ERROR.
                     IF AVAIL zz_file THEN DO:
                         tmpTime = "".
                         IF NUM-ENTRIES(zz_file.zz_char[12],",") > 1 THEN DO:
@@ -1975,8 +2004,8 @@ PROCEDURE ExportData:
         
         IF SEARCH(dataFile) = ? THEN DO:
             OUTPUT TO VALUE(dataFile).
-            FOR EACH rpt_det:
-                EXPORT rpt_det.
+            FOR EACH ttRpt_Det:
+                EXPORT ttRpt_Det.
             END.
             OUTPUT CLOSE.
         END.
@@ -1985,8 +2014,8 @@ PROCEDURE ExportData:
         IF SEARCH(dataFile) <> ? THEN DO:
             INPUT FROM VALUE(dataFile).
             REPEAT:
-                CREATE rpt_det.
-                IMPORT rpt_det. 
+                CREATE ttRpt_Det.
+                IMPORT ttRpt_Det. 
             END.
             INPUT CLOSE.
         END.
@@ -4397,9 +4426,8 @@ PROCEDURE LogIt:
         OUTPUT CLOSE.
     END.
     
-    
     /* This logs everything */
-    OUTPUT TO VALUE(cLogLoc + "\jmFull.log") APPEND.
+    OUTPUT TO VALUE(cLogLoc + "\jmFull-" + cDBase + "-" + STRING(MONTH(TODAY)) + "-" + STRING(YEAR(TODAY)) + ".log") APPEND.
     PUT UNFORMATTED STRING(TODAY) " " STRING(TIME,"HH:MM:SS") " " pMsg SKIP.
     OUTPUT CLOSE.
     
@@ -4924,16 +4952,16 @@ PROCEDURE RemoveFaults:
     FOR EACH tmp_ttArt: DELETE tmp_ttArt. END.
     FOR EACH ttArt: 
 
-        FIND rpt_det WHERE rpt_det.itemseq = ttArt.ttItemSeq NO-ERROR.
-        IF AVAILABLE rpt_det AND rpt_det.issue > ""
-            AND INDEX(rpt_det.issue,"Queue") = 0 THEN NEXT.
+        FIND ttRpt_Det WHERE ttRpt_Det.itemseq = ttArt.ttItemSeq NO-ERROR.
+        IF AVAILABLE ttRpt_Det AND ttRpt_Det.issue > ""
+                               AND INDEX(ttRpt_Det.issue,"Queue") = 0 THEN NEXT.
 
         CREATE tmp_ttArt.
         BUFFER-COPY ttArt TO tmp_ttArt.
     END.
 
-    FOR EACH rpt_det WHERE rpt_det.issue <> "":
-        RUN trimbeds(STRING(rpt_det.itemseq)). /*deletes all ttart records with this itemseq*/
+    FOR EACH ttRpt_Det WHERE ttRpt_Det.issue <> "":
+        RUN trimbeds(STRING(ttRpt_Det.itemseq)). /*deletes all ttart records with this itemseq*/
     END.
 
     FOR EACH tmp_ttArt BY tmp_ttArt.ttDue:
@@ -5211,47 +5239,37 @@ END PROCEDURE.
 
 
 PROCEDURE ReportIssues:
-    DEFINE INPUT PARAMETER tmpSeq  AS INT  NO-UNDO.
-    DEFINE INPUT PARAMETER subject AS CHAR NO-UNDO.
-    DEFINE INPUT PARAMETER OrderNo AS CHAR NO-UNDO.
-    DEFINE INPUT PARAMETER ItemNo  AS CHAR NO-UNDO.
-    DEFINE INPUT PARAMETER cSize   AS CHAR NO-UNDO.
-    DEFINE INPUT PARAMETER cImage  AS CHAR NO-UNDO.
-    DEFINE INPUT PARAMETER cBatch  AS CHAR NO-UNDO.
-    DEFINE INPUT PARAMETER cPos    AS CHAR NO-UNDO.
-    DEFINE INPUT PARAMETER SendXml AS CHAR NO-UNDO.
-    DEFINE INPUT PARAMETER RecXml  AS CHAR NO-UNDO.
-    DEFINE VARIABLE fileOk AS LOG NO-UNDO.
+/*------------------------------------------------------------------------------
+ Purpose: Update the "Issue" & "Reason" fields in the ttRpt_det table
+ 
+ INPUTS: pItemseq   -> Current Itemseq
+         pIssue     -> Report Item's Issue
+         pReason    -> More details on issue
+ 
+ Notes:
+------------------------------------------------------------------------------*/
+    DEFINE INPUT PARAMETER pItemseq     AS INT      NO-UNDO.
+    DEFINE INPUT PARAMETER pIssue       AS CHAR     NO-UNDO.
+    DEFINE INPUT PARAMETER pReason      AS CHAR     NO-UNDO.
 
-    FIND rpt_det WHERE rpt_det.itemseq = tmpSeq NO-ERROR.
-    IF AVAIL rpt_det THEN DO:
-        IF NOT rpt_det.issue MATCHES "*" + subject + "*" THEN DO:
-            ASSIGN rpt_det.issue  = rpt_det.issue + (IF rpt_det.issue = "" THEN "" ELSE "|") + subject.
-            IF cImage <> "" THEN
-                ASSIGN rpt_det.reason = rpt_det.reason + (IF rpt_det.reason = "" THEN "" ELSE "|") + cImage.
+    DEFINE VARIABLE FileOk              AS LOG      NO-UNDO.
+    DEFINE VARIABLE hRptDet             AS HANDLE   NO-UNDO.
+
+    FIND ttRpt_Det WHERE ttRpt_Det.itemseq = pItemSeq NO-ERROR.
+    IF AVAIL ttRpt_Det THEN DO:
+        IF NOT ttRpt_Det.issue MATCHES "*" + pIssue + "*" THEN DO:
+            ASSIGN ttRpt_Det.issue  = ttRpt_Det.issue + (IF ttRpt_Det.issue = "" THEN "" ELSE "|") + pIssue.
+            IF pReason <> "" THEN ASSIGN ttRpt_Det.reason = ttRpt_Det.reason + (IF ttRpt_Det.reason = "" THEN "" ELSE "|") + pReason.
         END.
     END.
-
-    CREATE issue.
-    ASSIGN issue.xSubject = subject
-           issue.xOrder   = OrderNo
-           issue.xItem    = ItemNo
-           issue.xSize    = cSize
-           issue.xImage   = cImage
-           issue.xBatch   = cBatch
-           issue.xPos     = cPos
-           issue.xSendXml = SendXml
-           issue.xRecXml  = RecXml.
-    
-    IF OS-GETENV("computername") = "qbprod" OR OS-GETENV("computername") = "qbtest" OR OS-GETENV("computername") = "pennyt" THEN DO:
-        RUN fileExists(cLogLoc,OUTPUT fileOk). 
-        IF fileOk THEN
-            OUTPUT TO VALUE(cLogLoc + "\MediaManagerlost-" + REPLACE(STRING(TODAY),"/","") + ".csv") APPEND.
-        ELSE 
-            OUTPUT TO VALUE("\\qbtest\bullseye\scripts\logfiles\MediaManagerlost-" + REPLACE(STRING(TODAY),"/","") + ".csv") APPEND.
-        EXPORT DELIMITER "," issue.
-        OUTPUT CLOSE.
+    ELSE DO:
+        CREATE ttRpt_det.
+        ASSIGN ttRpt_det.Itemseq = pItemseq
+               ttRpt_det.issue   = pIssue
+               ttRpt_det.reason  = pReason.
     END.
+    RELEASE ttRpt_det.
+    
 END PROCEDURE.
 
 
@@ -5374,7 +5392,9 @@ PROCEDURE Resets:
         IF sign_mm_hdr.SAVE_bed = YES THEN DelBatch = FALSE. 
         IF CAN-FIND (FIRST sign_mm_det WHERE sign_mm_det.batchseq = sign_mm_hdr.batchseq 
                                          AND sign_mm_det.itemseq  = 0) THEN DelBatch = TRUE.
+        
         IF DelBatch = FALSE THEN NEXT.
+        
         
         FOR EACH sign_mm_det OF sign_mm_hdr:
             DELETE sign_mm_det.
@@ -5387,15 +5407,25 @@ PROCEDURE Resets:
 END PROCEDURE.
 
 
-PROCEDURE RptDet:
-    DEFINE INPUT PARAMETER cItemseq AS INT  NO-UNDO.
-    DEFINE INPUT PARAMETER cSo      AS CHAR NO-UNDO.
-    DEFINE INPUT PARAMETER cItem    AS INT  NO-UNDO.
-    /*create a report record in case there are issues. These records are what show on the spreadsheet*/
-    CREATE rpt_det.
-    ASSIGN rpt_det.itemseq = cItemseq
-           rpt_det.so_no   = cSo
-           rpt_det.ITEM_no = cItem.
+PROCEDURE CreateRptDet:
+/*------------------------------------------------------------------------------
+ Purpose: Create a report record in case there are issues.
+          These records are what show on the spreadsheet
+ 
+ INPUTS: pItemseq -> Current itemseq       
+         pSo      -> Current SO#
+         pItemNo  -> Current item #
+ 
+ Notes:
+------------------------------------------------------------------------------*/
+    DEFINE INPUT PARAMETER pItemseq AS INT  NO-UNDO.
+    DEFINE INPUT PARAMETER pSo      AS CHAR NO-UNDO.
+    DEFINE INPUT PARAMETER pItemNo  AS INT  NO-UNDO.
+    
+    CREATE ttRpt_Det.
+    ASSIGN ttRpt_Det.Itemseq = pItemseq
+           ttRpt_Det.So_No   = pSo
+           ttRpt_Det.Item_No = pItemNo.
 
 END PROCEDURE.
 
@@ -5678,9 +5708,9 @@ PROCEDURE SetHomeFolder:
 ------------------------------------------------------------------------------*/
     RUN getDBase.
     
-    ASSIGN cHomeFolder  = imageShare + "AgentPhotos\temporary\mtl1" + (IF cDBase <> "LIVE" THEN ("-" + cDBase) ELSE "")
-           cRanFolder   = imageShare + "AgentPhotos\temporary\"     + (IF cDBase <> "LIVE" THEN ("-" + cDBase) ELSE "") + "\CompletedBatches"
-           cBatchImgLoc = imageShare + "AgentPhotos\temporary\CS6"  + (IF cDBase <> "LIVE" THEN ("-" + cDBase) ELSE "").
+    ASSIGN cHomeFolder  = imageShare + "AgentPhotos\temporary\mtl1"  + (IF cDBase <> "LIVE" THEN ("-" + cDBase) ELSE "")
+           cRanFolder   = cHomeFolder + "\CompletedBatches"
+           cBatchImgLoc = imageShare + "AgentPhotos\temporary\CS6"   + (IF cDBase <> "LIVE" THEN ("-" + cDBase) ELSE "").
                                            
 END PROCEDURE.
 
@@ -6006,7 +6036,7 @@ END PROCEDURE.
 
 PROCEDURE ExportRptDet:
     OUTPUT TO VALUE(SESSION:TEMP-DIR + "rpt_det.d").
-    FOR EACH rpt_det: EXPORT rpt_det. END.
+    FOR EACH ttRpt_Det: EXPORT ttRpt_Det. END.
     OUTPUT CLOSE.
 END PROCEDURE.
 

@@ -10,7 +10,7 @@ DEFINE {1} SHARED VARIABLE iCheckIn              AS INTEGER    NO-UNDO.
 
 ASSIGN cHomeFolder  = imageShare + "agentphotos\temporary\mtl1"
        cBatchImgLoc = imageShare + "AgentPhotos\temporary\CS6"
-       cRanFolder   = imageShare + "AgentPhotos\Temporary\CS6\CompletedBatches"
+       cRanFolder   = imageShare + "AgentPhotos\Temporary\mtl1\CompletedBatches"
        cLogLoc      = imageShare + "AgentPhotos\Temporary\MM Logs"
        iCheckIn     = TIME.
 

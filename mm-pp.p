@@ -133,33 +133,37 @@ DEFINE TEMP-TABLE ttImages
 DEFINE TEMP-TABLE tmp_ttArt LIKE ttArt.
 
 /****************** Global Buffers *******************************************/
-DEFINE BUFFER buf_ttart      FOR ttart.
-DEFINE BUFFER b_ttart        FOR ttart.
+DEFINE BUFFER b_ttArt        FOR ttArt.
 DEFINE BUFFER bbArt          FOR ttArt.
+
 DEFINE BUFFER b_mm_det       FOR sign_mm_det.
 DEFINE BUFFER buf_mm_det     FOR sign_mm_det.
 DEFINE BUFFER bb_mm_det      FOR sign_mm_det.
+
 DEFINE BUFFER buf_mm_hdr     FOR sign_mm_hdr.
 DEFINE BUFFER b_mm_hdr       FOR sign_mm_hdr.
 DEFINE BUFFER bb_mm_hdr      FOR sign_mm_hdr.
+
 DEFINE BUFFER b_mm_reprint   FOR sign_mm_reprint.
-DEFINE BUFFER buf_mm_reprint FOR sign_mm_reprint.
+
 DEFINE BUFFER b_signbed      FOR signbed.
 DEFINE BUFFER buf_signbed    FOR signbed.
+
 DEFINE BUFFER buf_beddet     FOR signbeddet.
 DEFINE BUFFER b_signbeddet   FOR signbeddet.
 DEFINE BUFFER b_beddet       FOR signbeddet.
+
 DEFINE BUFFER b_squ_mat      FOR squ_mat.
-DEFINE BUFFER buf_ptdet      FOR squ_ptdet.
-DEFINE BUFFER b_ptdet        FOR squ_ptdet.
+
+DEFINE BUFFER buf_squ_ptdet  FOR squ_ptdet.
 DEFINE BUFFER squdet         FOR squ_ptdet.
-DEFINE BUFFER b_items        FOR so_items.
+DEFINE BUFFER b_squ_ptdet    FOR squ_ptdet.
+
 DEFINE BUFFER b_so_items     FOR so_items.
 DEFINE BUFFER buf_so_items   FOR so_items.
+
 DEFINE BUFFER b_squ_plan     FOR squ_plan.
-DEFINE BUFFER buf_zz_file    FOR zz_file.
-DEFINE BUFFER zz_msg         FOR zz_file.
-DEFINE BUFFER buf_zz_msg     FOR zz_file.
+DEFINE BUFFER b_zz_file    FOR zz_file.
 
 /************************* End Definitions ***********************************/
     
@@ -215,7 +219,7 @@ PROCEDURE BuildTT:
  Notes:
 ------------------------------------------------------------------------------*/
     DEFINE INPUT PARAMETER pSo      AS CHAR  NO-UNDO.
-    DEFINE INPUT PARAMETER pItem    AS INT   NO-UNDO.
+    DEFINE INPUT PARAMETER pItemNo  AS INT   NO-UNDO.
 
     DEFINE VARIABLE SubstrateType   AS CHAR  NO-UNDO. /* Substrate Type */
     DEFINE VARIABLE TemplateNo      AS INT   NO-UNDO. /* Art's Template # */
@@ -240,7 +244,7 @@ PROCEDURE BuildTT:
     DEFINE VARIABLE IsDynamNestComp AS LOGICAL NO-UNDO.
 
                
-    FIND so_items NO-LOCK WHERE so_items.so_no = pSo AND so_items.ITEM_no = pItem NO-ERROR.
+    FIND so_items NO-LOCK WHERE so_items.so_no = pSo AND so_items.ITEM_no = pItemNo NO-ERROR.
     FIND so_file NO-LOCK WHERE so_file.so_no = pSo NO-ERROR.
     IF NOT AVAIL so_items OR NOT AVAIL so_file THEN NEXT.
 
@@ -252,7 +256,7 @@ PROCEDURE BuildTT:
         FIND FIRST squ_ptdet NO-LOCK WHERE squ_ptdet.itemseq = so_items.itemseq AND squ_ptdet.TYPE <> "Frame" NO-ERROR.
         IF AVAIL squ_ptdet THEN DO:
             ASSIGN SquptRID = ROWID(squ_ptdet).
-            IF NOT squ_ptdet.digitalDF  AND NOT squ_ptdet.digitalSF THEN DO:
+            IF squ_ptdet.digitalDF = FALSE AND squ_ptdet.digitalSF = FALSE THEN DO:
                 RUN ReportIssues(so_items.itemseq,"MM-Missing Sides","").
                 RETURN.
             END.
@@ -261,51 +265,50 @@ PROCEDURE BuildTT:
             FIND squ_mat NO-LOCK WHERE RECID(squ_mat) = MatRecid NO-ERROR. 
 
             IF NOT AVAIL squ_mat AND AVAIL squ_plan THEN DO:
-                RUN findIcNo(so_items.itemseq,so_items.so_no,so_items.ITEM_No,STRING(squ_plan.ic_no),so_items.part_no,"FALSE",OUTPUT InterCompSeq).
-                FIND FIRST b_ptdet NO-LOCK WHERE b_ptdet.itemseq = InterCompSeq AND b_ptdet.TYPE <> "Frame" NO-ERROR.
-                IF AVAIL b_ptdet THEN DO:
-                    RUN FindMatPanel.p (b_ptdet.subseq,OUTPUT MatRecid).
+                RUN findIcNo(so_items.itemseq,so_items.so_no,so_items.ITEM_No,STRING(squ_plan.ic_no),so_items.part_no,OUTPUT InterCompSeq).
+                FIND FIRST buf_squ_ptdet NO-LOCK WHERE buf_squ_ptdet.itemseq = InterCompSeq AND buf_squ_ptdet.TYPE <> "Frame" NO-ERROR.
+                IF AVAIL buf_squ_ptdet THEN DO:
+                    RUN FindMatPanel.p (buf_squ_ptdet.subseq,OUTPUT MatRecid).
                     FIND FIRST squ_mat NO-LOCK WHERE RECID(squ_mat) = MatRecid NO-ERROR. 
                 END.
                 
-                IF NOT AVAIL squ_mat THEN DO:
-                    RUN findIcNo(so_items.itemseq,so_items.so_no,so_items.ITEM_No,STRING(squ_plan.ic_no),so_items.part_no,"TRUE",OUTPUT InterCompSeq).
-                    FIND FIRST b_ptdet NO-LOCK WHERE b_ptdet.itemseq = InterCompSeq AND b_ptdet.TYPE <> "Frame" NO-ERROR.
-                    IF AVAIL b_ptdet THEN DO:
-                        RUN FindMatPanel.p (b_ptdet.subseq,OUTPUT MatRecid).
+                /*IF NOT AVAIL squ_mat THEN DO:
+                    RUN findIcNo(so_items.itemseq,so_items.so_no,so_items.ITEM_No,STRING(squ_plan.ic_no),so_items.part_no,OUTPUT InterCompSeq).
+                    FIND FIRST buf_squ_ptdet NO-LOCK WHERE buf_squ_ptdet.itemseq = InterCompSeq AND buf_squ_ptdet.TYPE <> "Frame" NO-ERROR.
+                    IF AVAIL buf_squ_ptdet THEN DO:
+                        RUN FindMatPanel.p (buf_squ_ptdet.subseq,OUTPUT MatRecid).
                         FIND FIRST squ_mat NO-LOCK WHERE RECID(squ_mat) = MatRecid NO-ERROR. 
                     END.
-                END.
+                END.*/
                 
-                IF NOT AVAIL squ_mat THEN DO:
-                    RUN findIcNo(so_items.itemseq,so_items.so_no,so_items.ITEM_No,STRING(squ_plan.ic_no),so_items.part_no,"Guess",OUTPUT InterCompSeq).
-                    FIND FIRST b_ptdet NO-LOCK WHERE b_ptdet.itemseq = InterCompSeq AND b_ptdet.TYPE <> "Frame" NO-ERROR.
-                    IF AVAIL b_ptdet THEN DO:
-                        RUN FindMatPanel.p (b_ptdet.subseq,OUTPUT MatRecid).
+                /*IF NOT AVAIL squ_mat THEN DO:
+                    RUN findIcNo(so_items.itemseq,so_items.so_no,so_items.ITEM_No,STRING(squ_plan.ic_no),so_items.part_no,OUTPUT InterCompSeq).
+                    FIND FIRST buf_squ_ptdet NO-LOCK WHERE buf_squ_ptdet.itemseq = InterCompSeq AND buf_squ_ptdet.TYPE <> "Frame" NO-ERROR.
+                    IF AVAIL buf_squ_ptdet THEN DO:
+                        RUN FindMatPanel.p (buf_squ_ptdet.subseq,OUTPUT MatRecid).
                         FIND FIRST squ_mat NO-LOCK WHERE RECID(squ_mat) = MatRecid NO-ERROR. 
                     END.
-                END.
+                END.*/
                 
             END.
         END.
         ELSE DO:
-            RUN findIcNo(so_items.itemseq,so_items.so_no,so_items.ITEM_No,STRING(squ_plan.ic_no),so_items.part_no,FALSE,OUTPUT InterCompSeq).
-            FIND FIRST b_ptdet NO-LOCK WHERE b_ptdet.itemseq = InterCompSeq AND b_ptdet.TYPE <> "Frame" NO-ERROR.
-            IF AVAIL b_ptdet THEN DO:
-                RUN FindMatPanel.p (b_ptdet.subseq,OUTPUT MatRecid).
+            RUN findIcNo(so_items.itemseq,so_items.so_no,so_items.ITEM_No,STRING(squ_plan.ic_no),so_items.part_no,OUTPUT InterCompSeq).
+            FIND FIRST buf_squ_ptdet NO-LOCK WHERE buf_squ_ptdet.itemseq = InterCompSeq AND buf_squ_ptdet.TYPE <> "Frame" NO-ERROR.
+            IF AVAIL buf_squ_ptdet THEN DO:
+                RUN FindMatPanel.p (buf_squ_ptdet.subseq,OUTPUT MatRecid).
                 FIND FIRST squ_mat NO-LOCK WHERE RECID(squ_mat) = MatRecid NO-ERROR. 
             END.
             
-            IF NOT AVAIL squ_mat THEN DO:
-                RUN findIcNo(so_items.itemseq,so_items.so_no,so_items.ITEM_No,STRING(squ_plan.ic_no),so_items.part_no,TRUE,OUTPUT InterCompSeq).
-                FIND FIRST b_ptdet NO-LOCK WHERE b_ptdet.itemseq = InterCompSeq AND b_ptdet.TYPE <> "Frame" NO-ERROR.
-                IF AVAIL b_ptdet THEN DO:
-                    RUN FindMatPanel.p (b_ptdet.subseq,OUTPUT MatRecid).
+            /*IF NOT AVAIL squ_mat THEN DO:
+                RUN findIcNo(so_items.itemseq,so_items.so_no,so_items.ITEM_No,STRING(squ_plan.ic_no),so_items.part_no,OUTPUT InterCompSeq).
+                FIND FIRST buf_squ_ptdet NO-LOCK WHERE buf_squ_ptdet.itemseq = InterCompSeq AND buf_squ_ptdet.TYPE <> "Frame" NO-ERROR.
+                IF AVAIL buf_squ_ptdet THEN DO:
+                    RUN FindMatPanel.p (buf_squ_ptdet.subseq,OUTPUT MatRecid).
                     FIND FIRST squ_mat NO-LOCK WHERE RECID(squ_mat) = MatRecid NO-ERROR. 
                 END.
-            END.
-            
-        END. /*end else do*/
+            END.*/
+        END. 
 
         ASSIGN CurMaterial   = ""
                InvPartNo     = ""
@@ -350,13 +353,11 @@ PROCEDURE BuildTT:
                 ELSE DO:
                     /* Vert Flute = flip height and width to get correct signs size to get correct template*/
                     IF squ_ptdet.VERT_flutes = FALSE AND squ_ptdet.horz_flutes = FALSE THEN DO:
-                        RUN ReportIssues(so_items.itemseq,"MM-No Flute Direction",SubstrateType + string(pt_det.pressprintingheight) + "x" + STRING(pt_det.pressprintingwidth)).
+                        RUN ReportIssues(so_items.itemseq,"MM-No Flute Direction",SubstrateType + STRING(pt_det.pressprintingheight) + "x" + STRING(pt_det.pressprintingwidth)).
                         RETURN.
                     END.
-                    ELSE DO:
-                        ASSIGN CurHeight = IF pt_det.vert_flutes THEN squ_ptdet.PressPrintingWidth  ELSE squ_ptdet.pressprintingHeight
-                               CurWidth  = IF pt_det.horz_flutes THEN squ_ptdet.PressPrintingHeight ELSE squ_ptdet.PressPrintingWidth.
-                    END.
+                    ELSE ASSIGN CurHeight = IF pt_det.vert_flutes THEN squ_ptdet.PressPrintingWidth  ELSE squ_ptdet.pressprintingHeight
+                                CurWidth  = IF pt_det.horz_flutes THEN squ_ptdet.PressPrintingHeight ELSE squ_ptdet.PressPrintingWidth.
                 END.
             END. 
             
@@ -410,7 +411,7 @@ PROCEDURE BuildTT:
             RUN getQty(so_items.itemseq,OUTPUT QtyRan, OUTPUT QtyNeeded, OUTPUT InQueue). 
             
             CurHotFolderSeq = IF NOT squ_ptdet.pt_hotfolderseq <= 0 THEN squ_ptdet.pt_hotfolderseq ELSE pt_det.pt_hotfolderseq.
-            RUN custhotfolder.p(so_items.itemseq,CurHotFolderSeq, OUTPUT NewHotFolderSeq).
+            RUN CustHotFolder.p(so_items.itemseq,CurHotFolderSeq, OUTPUT NewHotFolderSeq).
 
             CREATE ttArt.
             ASSIGN ttArt.ttTempSeq   = TemplateNo
@@ -426,17 +427,17 @@ PROCEDURE BuildTT:
                    ttArt.ttQty       = qtyNeeded  
                    ttArt.ttHotFolder = NewHotFolderSeq
                    ttArt.ttSwitch    = IsSwitch
-                   ttArt.ttSteelTent = (IF (squ_ptdet.steeltent OR squ_ptdet.jackunit) THEN TRUE ELSE FALSE) /* iLoop = 2 THEN TRUE ELSE FALSE*/
+                   ttArt.ttSteelTent = (IF (squ_ptdet.steeltent OR squ_ptdet.jackunit) THEN TRUE ELSE FALSE) 
                    ttArt.ttType      = IF IsReflect THEN CurMaterial + " Reflective" ELSE CurMaterial
                    ttArt.ttExploded  = FALSE
                    ttArt.ttDynamNest = IF TemplateNo = 0 THEN TRUE ELSE FALSE
                    ttArt.ttHorzFlute = squ_ptdet.horz_flutes
                    ttArt.ttVertFlute = squ_ptdet.VERT_flutes
                    .
-            RUN getHotfolder(1,ttArt.ttType,INPUT-OUTPUT ttArt.ttHotFolder, OUTPUT CurHotFolder).
+            RUN GetHotFolder(1,ttArt.ttType,INPUT-OUTPUT ttArt.ttHotFolder, OUTPUT CurHotFolder).
               
         END. 
-        ELSE RUN ReportIssues(so_items.itemseq,"MM-Planning","Unable to find panel").
+        ELSE RUN ReportIssues(so_items.itemseq,"MM-Planning","Unable to Find Panel").
     END.
 END PROCEDURE.
 
@@ -900,13 +901,14 @@ PROCEDURE CheckMaterial:
     DEFINE VARIABLE iQty         AS INT  NO-UNDO INITIAL 0.
     DEFINE VARIABLE cPart        AS CHAR NO-UNDO.
 
-    FOR EACH b_ttart WHERE b_ttart.ttItemseq = cSeq:
-        ASSIGN iQty  = iQty + b_ttart.ttqty
-               cPart = b_ttart.ttinvpart.
+    FOR EACH b_ttArt WHERE b_ttArt.ttItemseq = cSeq:
+        ASSIGN iQty  = iQty + b_ttArt.ttQty
+               cPart = b_ttArt.ttInvpart.
     END.
+    
     FIND ttMat WHERE ttMat.ttPart = cPart NO-ERROR.
     IF AVAIL ttMat AND (ttmat.ttQty - iQty > - 1) THEN DO:
-        ASSIGN ttmat.ttqty = ttmat.ttqty - iQty
+        ASSIGN ttMat.ttQty = ttMat.ttQty - iQty
                       c_ok = TRUE.
     END.
     ELSE ASSIGN c_ok = FALSE.
@@ -1290,8 +1292,8 @@ PROCEDURE DynamicNest:
             
             FOR EACH tNest BREAK BY tNest.bedid BY tNest.posX:
             
-                FIND FIRST b_ttart NO-LOCK WHERE b_ttart.ttItemseq = tNest.itemseq AND b_ttart.ttFile = tNest.artfile NO-ERROR.
-                IF AVAILABLE b_ttart THEN DO:
+                FIND FIRST b_ttArt NO-LOCK WHERE b_ttArt.ttItemseq = tNest.itemseq AND b_ttArt.ttFile = tNest.artfile NO-ERROR.
+                IF AVAILABLE b_ttArt THEN DO:
                 
                     IF FIRST-OF(tNest.bedid) THEN DO:   
                         /*create the header*/
@@ -1308,30 +1310,30 @@ PROCEDURE DynamicNest:
                                sign_mm_hdr.RUN_date         = ?
                                sign_mm_hdr.RUN_time         = ?
                                sign_mm_hdr.matlType         = b_ttArt.ttType
-                               sign_mm_hdr.sides            = b_ttArt.ttsides
+                               sign_mm_hdr.sides            = b_ttArt.ttSides
                                sign_mm_hdr.bedseq           = 0
                                sign_mm_hdr.PointerSeq       = 0
-                               sign_mm_hdr.inv_part         = (IF tNest.INVpart <> "" THEN tNest.INVpart ELSE b_ttart.ttInvPart)
+                               sign_mm_hdr.inv_part         = (IF tNest.INVpart <> "" THEN tNest.INVpart ELSE b_ttArt.ttInvPart)
                                sign_mm_hdr.qty              = 1
                                sign_mm_hdr.rerun            = IF cItemseq <> "" THEN TRUE ELSE FALSE
                                sign_mm_hdr.reprint          = IF cItemseq <> "" THEN TRUE ELSE FALSE
                                /*sign_mm_hdr.fullbed          = TRUE /*full bed*/*/
-                               sign_mm_hdr.pt_hotfolderseq  = b_ttArt.tthotfolder
+                               sign_mm_hdr.pt_hotfolderseq  = b_ttArt.ttHotfolder
                                sign_mm_hdr.dynamicTemplate  = tNest.template
                                pCnt                         = 1
                                pSQIN                        = 0
-                               DynamicSize                  = STRING(tNest.panelH) + "x" + string(tNest.panelW)
+                               DynamicSize                  = STRING(tNest.panelH) + "x" + STRING(tNest.panelW)
                                AllSameSize                  = TRUE. 
                     END.
 
                     /*create the details*/
                     /*determine sign_mm_det.artlinkseq*/
-                    FIND FIRST so_art NO-LOCK WHERE so_art.itemseq = b_ttart.ttitemseq AND so_art.artfile = ENTRY(1,b_ttart.ttfile,",") NO-ERROR.
+                    FIND FIRST so_art NO-LOCK WHERE so_art.itemseq = b_ttArt.ttitemseq AND so_art.artfile = ENTRY(1,b_ttArt.ttFile,",") NO-ERROR.
                     
                     CREATE sign_mm_det.
                     ASSIGN sign_mm_det.batchseq        = nextseq
                            sign_mm_det.part_no         = b_ttArt.ttPart
-                           sign_mm_det.itemseq         = b_ttArt.ttitemseq
+                           sign_mm_det.itemseq         = b_ttArt.ttItemseq
                            sign_mm_det.artlinkseq      = IF AVAIL so_art THEN so_art.disp_order ELSE 0
                            sign_mm_det.artfile         = b_ttArt.ttFile
                            sign_mm_det.inv_part        = b_ttArt.ttInvPart
@@ -2021,135 +2023,154 @@ END PROCEDURE.
 
 
 PROCEDURE FindIcNo:
-    DEFINE INPUT PARAMETER cItemSeq AS INT  NO-UNDO.
-    DEFINE INPUT PARAMETER cSo      AS CHAR NO-UNDO.
-    DEFINE INPUT PARAMETER cItemNo  AS INT  NO-UNDO.
-    DEFINE INPUT PARAMETER cIC      AS CHAR NO-UNDO.
-    DEFINE INPUT PARAMETER cPartNo  AS CHAR NO-UNDO.
-    DEFINE INPUT PARAMETER guess    AS CHAR NO-UNDO.
-    DEFINE OUTPUT PARAMETER cICseq  AS INT  NO-UNDO.
-    DEFINE VARIABLE foundBom        AS LOG  NO-UNDO.
-    DEFINE VARIABLE icNum           AS INT  NO-UNDO.
+/*------------------------------------------------------------------------------
+ Purpose: Find and return the InterCompany itemseq 
+ 
+ INPUTS:  pPath    -> File path to explore
+          pMatches -> Value to see if file path matches  
+ 
+ OUTPUT:  oICSeq   -> Intercompany itemseq
+ Notes:
+------------------------------------------------------------------------------*/
+    DEFINE INPUT  PARAMETER pItemSeq AS INT  NO-UNDO.
+    DEFINE INPUT  PARAMETER pSo      AS CHAR NO-UNDO.
+    DEFINE INPUT  PARAMETER pItemNo  AS INT  NO-UNDO.
+    DEFINE INPUT  PARAMETER pIC      AS CHAR NO-UNDO. /* Guess InterCompany # */
+    DEFINE INPUT  PARAMETER pPartNo  AS CHAR NO-UNDO.
+    DEFINE OUTPUT PARAMETER oICseq   AS INT  NO-UNDO.
+    
+    DEFINE VARIABLE icNum            AS INT  NO-UNDO.
 
-    DEFINE BUFFER buf5_squ_ptdet FOR squ_ptdet.
-    DEFINE BUFFER buf5_so_items  FOR so_items.
-
-    icNum = 0. cIcSeq = 0.
     /*count what number on the IC this should be*/
-    FOR EACH b_items NO-LOCK WHERE b_items.so_no = cSo BY b_items.ITEM_no:
-        FIND b_squ_plan NO-LOCK WHERE b_squ_plan.itemseq = b_items.itemseq NO-ERROR.
+    ASSIGN icNum  = 0
+           oICseq = 0.
+    FOR EACH b_so_items NO-LOCK WHERE b_so_items.so_no = pSo BY b_so_items.ITEM_no: 
+        FIND b_squ_plan NO-LOCK WHERE b_squ_plan.itemseq = b_so_items.itemseq NO-ERROR.
         IF AVAIL b_squ_plan AND b_squ_plan.ic_no <> "" THEN icNum = icNum + 1. 
-        IF b_items.ITEM_no = cItemNo THEN LEAVE.
-       
+        IF b_so_items.ITEM_no = pItemNo THEN LEAVE.
     END.
     IF AVAIL b_squ_plan THEN RELEASE b_squ_plan.
 
-    IF guess = "FALSE" THEN DO:
-        /*check so_post record to see if it tells me*/
-        FOR EACH b_items NO-LOCK WHERE b_items.so_no = STRING(cIC) BY b_items.ITEM_no:
-            IF CAN-FIND(FIRST so_post NO-LOCK WHERE so_post.so_no = b_items.so_no AND so_post.ITEM_no = b_items.ITEM_no
-                        AND so_post.post_so = cSO AND so_post.post_item = cItemNo) THEN DO:
-                ASSIGN cICSeq = b_items.itemseq.
-            END.
+    /*check so_post record to see if it tells me*/
+    FOR EACH b_so_items NO-LOCK WHERE b_so_items.so_no = STRING(pIC) BY b_so_items.ITEM_no:
+        IF CAN-FIND(FIRST so_post NO-LOCK WHERE so_post.so_no     = b_so_items.so_no 
+                                            AND so_post.ITEM_no   = b_so_items.ITEM_no
+                                            AND so_post.post_so   = pSo 
+                                            AND so_post.post_item = pItemNo) THEN DO:
+            ASSIGN oICseq = b_so_items.itemseq.
+            RETURN.
         END.
     END.
-    IF guess = "TRUE" THEN DO:
-        IF cICSeq = 0 THEN DO:
-            FOR EACH inv_item NO-LOCK WHERE inv_item.inv_no = STRING(cIC) BY inv_item.ITEM_no:
-                IF CAN-FIND(FIRST so_post NO-LOCK WHERE so_post.so_no = inv_item.inv_no AND so_post.ITEM_no = inv_item.ITEM_no
-                            AND so_post.post_so = cSO AND so_post.post_item = cItemNo) THEN DO:
-                    ASSIGN cICSeq = inv_item.itemseq.
-                END.
-            END.
+    
+    FOR EACH inv_item NO-LOCK WHERE inv_item.inv_no = STRING(pIC) BY inv_item.ITEM_no:
+        IF CAN-FIND(FIRST so_post NO-LOCK WHERE so_post.so_no     = inv_item.inv_no 
+                                            AND so_post.ITEM_no   = inv_item.ITEM_no
+                                            AND so_post.post_so   = pSo 
+                                            AND so_post.post_item = pItemNo) THEN DO:
+            ASSIGN oICseq = inv_item.itemseq.
+            RETURN.
         END.
     END.
-    IF cICseq = 0 THEN DO:
-        /*make an educated guess*/
-        IF CAN-FIND(FIRST b_items NO-LOCK WHERE b_items.so_no = STRING(cIC)) THEN DO:
-            FIND FIRST b_items NO-LOCK WHERE b_items.so_no = STRING(cIC) AND b_items.ITEM_no = cItemNo NO-ERROR.
-            IF NOT AVAIL b_items THEN
-                FIND FIRST b_items NO-LOCK WHERE b_items.so_no = string(cIC) AND b_items.part_no = cPartNo NO-ERROR.
-            IF AVAIL b_items THEN DO:
-                ASSIGN cIcSeq = b_items.itemseq.
-            END.
-            ELSE DO:
-                FOR EACH b_items NO-LOCK WHERE b_items.so_no = string(cIC):
-                    FOR EACH buf_ptdet NO-LOCK WHERE buf_ptdet.itemseq = b_items.itemseq AND buf_ptdet.TYPE <> "Frame":
-                        FOR EACH squ_mat NO-LOCK OF buf_ptdet:
-                            IF CAN-FIND(FIRST BOM_file NO-LOCK WHERE bom_file.parent = cPartNo AND bom_file.part_no = squ_mat.part_no) THEN DO:
-                                ASSIGN cICSeq = buf_ptdet.itemseq.
-                            END.
+    
+    /* Couldn't find a so_post so try a different way */
+    IF CAN-FIND(FIRST b_so_items NO-LOCK WHERE b_so_items.so_no = STRING(pIC)) THEN DO:
+        FIND FIRST b_so_items NO-LOCK WHERE b_so_items.so_no = STRING(pIC) AND b_so_items.ITEM_no = pItemNo NO-ERROR.
+        IF NOT AVAIL b_so_items THEN FIND FIRST b_so_items NO-LOCK WHERE b_so_items.so_no = STRING(pIC) AND b_so_items.part_no = pPartNo NO-ERROR.
+        IF AVAIL b_so_items THEN DO:
+            ASSIGN oICseq = b_so_items.itemseq.
+            RETURN.
+        END.
+        ELSE DO:
+            FOR EACH b_so_items NO-LOCK WHERE b_so_items.so_no = STRING(pIC):
+                FOR EACH buf_squ_ptdet NO-LOCK WHERE buf_squ_ptdet.itemseq = b_so_items.itemseq AND buf_squ_ptdet.TYPE <> "Frame":
+                    FOR EACH squ_mat NO-LOCK OF buf_squ_ptdet:
+                        IF CAN-FIND(FIRST BOM_file NO-LOCK WHERE bom_file.parent  = pPartNo 
+                                                             AND bom_file.part_no = squ_mat.part_no) THEN DO:
+                            ASSIGN oICseq = buf_squ_ptdet.itemseq.
+                            RETURN.
                         END.
                     END.
                 END.
             END.
-            IF cICseq = 0 THEN DO:
-                FIND b_items NO-LOCK WHERE b_items.so_no = STRING(cIC) AND b_items.ITEM_no = icNum NO-ERROR.
-                IF AVAIL b_items THEN DO:
-                    FIND FIRST buf_ptdet NO-LOCK WHERE buf_ptdet.itemseq = b_items.itemseq AND buf_ptdet.TYPE <> "Frame" NO-ERROR.
-                    IF AVAIL buf_ptdet THEN ASSIGN cICSeq = buf_ptdet.itemseq.
-                END.
-            END.
-            IF cICseq = 0 THEN DO:
-                /* if there's only one, use it */
-                FIND b_items NO-LOCK WHERE b_items.so_no = STRING(cIC) NO-ERROR.
-                IF AVAIL b_items THEN DO:
-                    FIND FIRST buf_ptdet NO-LOCK WHERE buf_ptdet.itemseq = b_items.itemseq AND buf_ptdet.TYPE <> "Frame" NO-ERROR.
-                    IF AVAIL buf_ptdet THEN ASSIGN cICSeq = buf_ptdet.itemseq.
-                END.
+        END.
+            
+        FIND b_so_items NO-LOCK WHERE b_so_items.so_no = STRING(pIC) AND b_so_items.ITEM_no = icNum NO-ERROR.
+        IF AVAIL b_so_items THEN DO:
+            FIND FIRST buf_squ_ptdet NO-LOCK WHERE buf_squ_ptdet.itemseq = b_so_items.itemseq AND buf_squ_ptdet.TYPE <> "Frame" NO-ERROR.
+            IF AVAIL buf_squ_ptdet THEN DO:
+                ASSIGN oICseq = buf_squ_ptdet.itemseq.
+                RETURN.
             END.
         END.
         ELSE DO:
-            FIND FIRST inv_item NO-LOCK WHERE inv_item.inv_no = STRING(cIC) AND inv_item.ITEM_no = cItemNo NO-ERROR.
-            IF NOT AVAIL inv_item THEN
-                FIND inv_item NO-LOCK WHERE inv_item.inv_no = string(cIC) AND inv_item.part_no = cPartNo NO-ERROR.
-            IF AVAIL inv_item THEN DO:
-                ASSIGN cIcSeq = inv_item.itemseq.
-            END.
-            ELSE DO:
-                FOR EACH inv_item NO-LOCK WHERE inv_item.inv_no = string(cIC):
-                    FOR EACH buf_ptdet NO-LOCK WHERE buf_ptdet.itemseq = inv_item.itemseq AND buf_ptdet.TYPE <> "Frame":
-                        FOR EACH squ_mat NO-LOCK OF buf_ptdet:
-                            IF CAN-FIND(FIRST BOM_file NO-LOCK WHERE bom_file.parent = cPartNo AND bom_file.part_no = squ_mat.part_no) THEN DO:
-                                ASSIGN cICSeq = buf_ptdet.itemseq.
-                            END.
-                        END.
-                    END.
-                END.
-            END.
-            IF cICseq = 0 THEN DO:
-                FIND inv_item NO-LOCK WHERE inv_item.inv_no = STRING(cIC) AND inv_item.ITEM_no = icNum NO-ERROR.
-                IF AVAIL inv_item THEN DO:
-                    FIND FIRST buf_ptdet NO-LOCK WHERE buf_ptdet.itemseq = inv_item.itemseq AND buf_ptdet.TYPE <> "Frame" NO-ERROR.
-                    IF AVAIL buf_ptdet THEN ASSIGN cICSeq = buf_ptdet.itemseq.
-                END.
-            END.
-            IF cICSeq = 0 THEN DO:
-                FIND buf5_so_items NO-LOCK WHERE buf5_so_items.itemseq = cItemSeq NO-ERROR.
-                IF AVAILABLE buf5_so_items THEN DO:
-                    FIND buf5_squ_ptdet OF buf5_so_items NO-LOCK  WHERE buf5_squ_ptdet.TYPE <> "FRAME" NO-ERROR.
-                    IF AVAILABLE buf5_squ_ptdet THEN DO:
-                        FOR EACH inv_item NO-LOCK WHERE inv_item.inv_no = STRING(cIC),
-                        EACH squ_ptdet OF inv_item NO-LOCK:
-                            IF squ_ptdet.pressprintingheight = buf5_squ_ptdet.pressprintingheight
-                            AND squ_ptdet.pressprintingwidth = buf5_squ_ptdet.pressprintingwidth THEN DO:
-                                ASSIGN cICSeq = inv_item.itemseq.
-                            END.
-                        END.
-                        IF cICSeq = 0 THEN
-                        FOR EACH b_items NO-LOCK WHERE b_items.so_no = STRING(cIC),
-                        EACH squ_ptdet OF b_items NO-LOCK:
-
-                            IF squ_ptdet.pressprintingheight = buf5_squ_ptdet.pressprintingheight
-                            AND squ_ptdet.pressprintingwidth = buf5_squ_ptdet.pressprintingwidth THEN DO:
-                                ASSIGN cICSeq = b_items.itemseq.
-                            END.
+            FIND b_so_items NO-LOCK WHERE b_so_items.so_no = STRING(pIC) NO-ERROR.
+            IF AVAIL b_so_items THEN DO:
+                FIND FIRST buf_squ_ptdet NO-LOCK WHERE buf_squ_ptdet.itemseq = b_so_items.itemseq AND buf_squ_ptdet.TYPE <> "Frame" NO-ERROR.
+                IF AVAIL buf_squ_ptdet THEN DO:
+                    ASSIGN oICseq = buf_squ_ptdet.itemseq.
+                    RETURN.
+                END. 
+            END.   
+        END.
+    END.
+    ELSE DO:
+        FIND FIRST inv_item NO-LOCK WHERE inv_item.inv_no = STRING(pIC) AND inv_item.ITEM_no = pItemNo NO-ERROR.
+        IF NOT AVAIL inv_item THEN FIND inv_item NO-LOCK WHERE inv_item.inv_no = STRING(pIC) AND inv_item.part_no = pPartNo NO-ERROR.
+        IF AVAIL inv_item THEN DO:
+            ASSIGN oICseq = inv_item.itemseq.
+            RETURN.
+        END.
+        ELSE DO:
+            FOR EACH inv_item NO-LOCK WHERE inv_item.inv_no = STRING(pIC):
+                FOR EACH buf_squ_ptdet NO-LOCK WHERE buf_squ_ptdet.itemseq = inv_item.itemseq AND buf_squ_ptdet.TYPE <> "Frame":
+                    FOR EACH squ_mat NO-LOCK OF buf_squ_ptdet:
+                        IF CAN-FIND(FIRST BOM_file NO-LOCK WHERE bom_file.parent  = pPartNo 
+                                                             AND bom_file.part_no = squ_mat.part_no) THEN DO:
+                            ASSIGN oICseq = buf_squ_ptdet.itemseq.
+                            RETURN.
                         END.
                     END.
                 END.
             END.
         END.
+            
+        FIND inv_item NO-LOCK WHERE inv_item.inv_no = STRING(pIC) AND inv_item.ITEM_no = icNum NO-ERROR.
+        IF AVAIL inv_item THEN DO:
+            FIND FIRST buf_squ_ptdet NO-LOCK WHERE buf_squ_ptdet.itemseq = inv_item.itemseq AND buf_squ_ptdet.TYPE <> "Frame" NO-ERROR.
+            IF AVAIL buf_squ_ptdet THEN DO:
+                ASSIGN oICseq = buf_squ_ptdet.itemseq.
+                RETURN.
+            END.
+        END.
+            
+        FIND buf_so_items NO-LOCK WHERE buf_so_items.itemseq = pItemSeq NO-ERROR.
+        IF AVAILABLE buf_so_items THEN DO:
+            FIND b_squ_ptdet OF buf_so_items NO-LOCK WHERE b_squ_ptdet.TYPE <> "FRAME" NO-ERROR.
+            IF AVAILABLE b_squ_ptdet THEN DO:
+                FOR EACH inv_item NO-LOCK WHERE inv_item.inv_no = STRING(pIC),
+                    EACH squ_ptdet OF inv_item NO-LOCK:
+                    
+                    IF  squ_ptdet.pressprintingheight = b_squ_ptdet.pressprintingheight
+                    AND squ_ptdet.pressprintingwidth  = b_squ_ptdet.pressprintingwidth THEN DO:
+                        ASSIGN oICseq = inv_item.itemseq.
+                        RETURN.
+                    END.
+                END.
+                        
+                FOR EACH b_so_items NO-LOCK WHERE b_so_items.so_no = STRING(pIC),
+                    EACH squ_ptdet OF b_so_items NO-LOCK:
+    
+                    IF  squ_ptdet.pressprintingheight = b_squ_ptdet.pressprintingheight
+                    AND squ_ptdet.pressprintingwidth  = b_squ_ptdet.pressprintingwidth THEN DO:
+                        ASSIGN oICseq = b_so_items.itemseq.
+                        RETURN.
+                    END.
+                END.
+                
+            END.
+        END.
     END.
+
 END PROCEDURE.
 
 
@@ -3095,12 +3116,12 @@ PROCEDURE GetHotFolder:
         IF INDEX(cMaterial,"Omegabond Reflective") = 0 THEN cMaterial = REPLACE(cMaterial,"Reflective","").
         ELSE cHotFolderSeq = 35.
         
-        IF INDEX(cMaterial,"Steel") > 0 THEN cMaterial = "Steel Ref " + SUBSTRING(cMaterial,7).
+        IF      INDEX(cMaterial,"Steel")    > 0 THEN cMaterial = "Steel Ref " + SUBSTRING(cMaterial,7).
         ELSE IF INDEX(cMaterial,"Aluminum") > 0 THEN cMaterial = "Aluminum Ref " + SUBSTRING(cMaterial,10).
-        ELSE IF INDEX(cMaterial,"Poly") > 0 THEN cMaterial = "Poly Ref " + SUBSTRING(cMaterial,7).
-        ELSE IF INDEX(cMaterial,"PVC") > 0 THEN cMaterial = "PVC Ref". 
-        ELSE IF INDEX(cMaterial,"Corex") > 0 THEN DO:
-            IF INDEX(cMaterial,"4mm") > 0 THEN cMaterial = "Corex Ref 4mm".
+        ELSE IF INDEX(cMaterial,"Poly")     > 0 THEN cMaterial = "Poly Ref " + SUBSTRING(cMaterial,7).
+        ELSE IF INDEX(cMaterial,"PVC")      > 0 THEN cMaterial = "PVC Ref". 
+        ELSE IF INDEX(cMaterial,"Corex")    > 0 THEN DO:
+            IF INDEX(cMaterial,"4mm")       > 0 THEN cMaterial = "Corex Ref 4mm".
             ELSE cMaterial = "Corex Ref 6mm".    
         END.
         
@@ -3117,13 +3138,12 @@ PROCEDURE GetHotFolder:
         END.
     END.
 
-    cPrintNum = 0. cHotFolder = "". /* cHotfolderseq = 0. */
+    ASSIGN cPrintNum  = 0 
+           cHotFolder = "". 
     IF cBATCH > 1 AND cHotFolderSeq = 0 THEN DO:
         FOR FIRST b_mm_det NO-LOCK WHERE b_mm_det.batchseq = cBatch:
             FIND pt_hotfolder NO-LOCK WHERE pt_hotfolder.pt_hotfolderseq = b_mm_det.pt_hotfolderseq NO-ERROR.
-            IF AVAILABLE pt_hotfolder THEN DO:
-                cHotfolderSeq = pt_hotfolder.pt_hotfolderseq.
-            END.
+            IF AVAILABLE pt_hotfolder THEN cHotfolderSeq = pt_hotfolder.pt_hotfolderseq.
             IF AVAILABLE pt_hotfolder THEN RELEASE pt_hotfolder.
         END.
     END.
@@ -3131,20 +3151,15 @@ PROCEDURE GetHotFolder:
     IF cHotFolderSeq = 0 THEN DO:
         /*try and default it to pop 55 solid first*/
         FIND FIRST pt_hotfolder NO-LOCK WHERE pt_hotfolder.matlType = cMaterial AND pt_hotfolder.quality = "Pop 55 Solid"  NO-ERROR.
-        IF AVAIL pt_hotfolder THEN DO:
-            ASSIGN cHotfolderseq = pt_hotfolder.pt_hotfolderseq.
-        END.
+        IF AVAIL pt_hotfolder THEN ASSIGN cHotfolderseq = pt_hotfolder.pt_hotfolderseq.
 
         IF cHotFolderSeq = 0 THEN DO:
             DO pLoop = 1 TO NUM-ENTRIES(cPrintTypes):
                 FIND FIRST pt_hotfolder NO-LOCK WHERE pt_hotfolder.matlType = cMaterial AND pt_hotfolder.quality =  entry(pLoop,cPrintTypes) NO-ERROR.
-                IF AVAIL pt_hotfolder THEN DO:
-                    ASSIGN cHotfolderseq = pt_hotfolder.pt_hotfolderseq.
-                END.
+                IF AVAIL pt_hotfolder THEN ASSIGN cHotfolderseq = pt_hotfolder.pt_hotfolderseq.
             END.
         END.
     END.
-    
  
     SendError = FALSE.
     FIND FIRST pt_hotfolder NO-LOCK WHERE pt_hotfolder.pt_hotfolderseq = cHotFolderSeq NO-ERROR.
@@ -3154,7 +3169,7 @@ PROCEDURE GetHotFolder:
             FIND FIRST pt_hotfolder NO-LOCK WHERE pt_hotfolder.quality = CurrentQuality AND pt_hotfolder.matlType = cMaterial NO-ERROR.
         END.
         
-        IF AVAILABLE pt_hotfolder THEN ASSIGN cHotfolder    = cHomeFolder + "\" + entry((NUM-ENTRIES(pt_hotfolder.pathway,"\") - 1),pt_hotfolder.pathway,"\") + "\" + entry(NUM-ENTRIES(pt_hotfolder.pathway,"\"),pt_hotfolder.pathway,"\")
+        IF AVAILABLE pt_hotfolder THEN ASSIGN cHotfolder    = cHomeFolder + "\" + ENTRY((NUM-ENTRIES(pt_hotfolder.pathway,"\") - 1),pt_hotfolder.pathway,"\") + "\" + ENTRY(NUM-ENTRIES(pt_hotfolder.pathway,"\"),pt_hotfolder.pathway,"\")
                                               cHotfolderseq = pt_hotfolder.pt_hotfolderseq.
         ELSE SendError = TRUE.
     END.
@@ -3162,7 +3177,7 @@ PROCEDURE GetHotFolder:
     
     IF SendError THEN DO:
         FOR EACH b_mm_det NO-LOCK WHERE b_mm_det.batchseq = cBatch: 
-            RUN reportIssues (b_mm_det.itemseq,"MM-Hotfolder not found","").
+            RUN ReportIssues (b_mm_det.itemseq,"Hotfolder Not Found","").
         END.
         ASSIGN cHotFolder = "Error".
     END.
@@ -3172,6 +3187,11 @@ END PROCEDURE.
 
 
 PROCEDURE GetDBase:
+/*------------------------------------------------------------------------------
+ Purpose: Determine current Database connection
+ 
+ Notes:
+------------------------------------------------------------------------------*/
     DEFINE VARIABLE cDBParams AS CHAR NO-UNDO.
 
     cDBParams = DBPARAM(1).
@@ -3405,13 +3425,13 @@ PROCEDURE GetReprintQty:
     DEFINE OUTPUT PARAMETER pNeed      AS INT NO-UNDO INITIAL 0.
     DEFINE OUTPUT PARAMETER inQueue    AS LOG NO-UNDO INITIAL FALSE.
     
-    FIND buf_mm_reprint NO-LOCK WHERE buf_mm_reprint.ReprintId = pReprintId AND buf_mm_reprint.COMPLETED = FALSE NO-ERROR.
-    IF AVAILABLE buf_mm_reprint THEN DO:
-        FOR EACH buf_mm_det NO-LOCK WHERE buf_mm_det.ReprintId = buf_mm_reprint.ReprintId:
+    FIND b_mm_reprint NO-LOCK WHERE b_mm_reprint.ReprintId = pReprintId AND b_mm_reprint.COMPLETED = FALSE NO-ERROR.
+    IF AVAILABLE b_mm_reprint THEN DO:
+        FOR EACH buf_mm_det NO-LOCK WHERE buf_mm_det.ReprintId = b_mm_reprint.ReprintId:
             inQueue = TRUE.
             pRan = pRan + 1. 
         END.
-        pNeed = buf_mm_reprint.qty - pRan.
+        pNeed = b_mm_reprint.qty - pRan.
     END.
 END PROCEDURE.
 
@@ -4826,10 +4846,12 @@ PROCEDURE RecordHdrDelete:
     DEFINE INPUT PARAMETER pBatchNo   AS INT  NO-UNDO.
     DEFINE INPUT PARAMETER pProcedure AS CHAR NO-UNDO.
     
-    OUTPUT TO VALUE(cLogLoc + "\" + "DeletedBatches-" + STRING(MONTH(TODAY)) 
-                                                + "-" + STRING(DAY(TODAY))
-                                                + "-" + STRING(YEAR(TODAY))
-                                                + ".csv") APPEND.
+    OUTPUT TO VALUE(cLogLoc + "\" + "DeletedBatches-" 
+                                  + cDBase
+                                  + STRING(MONTH(TODAY)) 
+                                  + "-" + STRING(DAY(TODAY))
+                                  + "-" + STRING(YEAR(TODAY))
+                                  + ".csv") APPEND.
                                                 
     EXPORT DELIMITER "," STRING(pBatchNo)
                          "mm-pp.p"
@@ -4988,19 +5010,15 @@ PROCEDURE ReleaseAll:
     IF AVAILABLE  b_mm_hdr       THEN RELEASE b_mm_hdr.
     IF AVAILABLE  bb_mm_hdr      THEN RELEASE bb_mm_hdr.
     IF AVAILABLE  b_mm_reprint   THEN RELEASE b_mm_reprint.
-    IF AVAILABLE  buf_mm_reprint THEN RELEASE buf_mm_reprint.
     IF AVAILABLE  b_signbed      THEN RELEASE b_signbed.
     IF AVAILABLE  buf_signbed    THEN RELEASE buf_signbed.
     IF AVAILABLE  buf_beddet     THEN RELEASE buf_beddet.
     IF AVAILABLE  b_signbeddet   THEN RELEASE b_signbeddet.
     IF AVAILABLE  b_beddet       THEN RELEASE b_beddet.
     IF AVAILABLE  b_squ_mat      THEN RELEASE b_squ_mat.
-    IF AVAILABLE  buf_ptdet      THEN RELEASE buf_ptdet.
-    IF AVAILABLE  b_ptdet        THEN RELEASE b_ptdet.
-    IF AVAILABLE  b_items        THEN RELEASE b_items.
+    IF AVAILABLE  buf_squ_ptdet  THEN RELEASE buf_squ_ptdet.
     IF AVAILABLE  b_so_items     THEN RELEASE b_so_items.
     IF AVAILABLE  b_squ_plan     THEN RELEASE b_squ_plan.
-    IF AVAILABLE  zz_msg         THEN RELEASE zz_msg.
 
     /*release all normal records*/
     IF AVAILABLE  sign_mm_det     THEN RELEASE sign_mm_det.
@@ -5046,10 +5064,10 @@ PROCEDURE RemoveFaults:
             FIND squ_plan NO-LOCK WHERE squ_plan.itemseq = tmp_ttArt.ttItemseq NO-ERROR.
             IF AVAIL squ_plan AND squ_plan.ic_no <> "" THEN DO:
                 alphaOk = FALSE.
-                RUN findIcNo(so_items.itemseq,so_items.so_no,so_items.ITEM_No,STRING(squ_plan.ic_no),so_items.part_no,NO,OUTPUT cICseq).
-                FIND b_items NO-LOCK WHERE b_items.ITEMseq = cICSeq NO-ERROR.
-                IF NOT AVAIL b_items THEN alphaOk = TRUE.
-                IF AVAIL b_items AND b_items.orderqty = b_items.ship_qty THEN alphaOk = TRUE.
+                RUN findIcNo(so_items.itemseq,so_items.so_no,so_items.ITEM_No,STRING(squ_plan.ic_no),so_items.part_no,OUTPUT cICseq).
+                FIND b_so_items NO-LOCK WHERE b_so_items.ITEMseq = cICSeq NO-ERROR.
+                IF NOT AVAIL b_so_items THEN alphaOk = TRUE.
+                IF AVAIL b_so_items AND b_so_items.orderqty = b_so_items.ship_qty THEN alphaOk = TRUE.
             END.
             ELSE alphaOK = TRUE.
         END.
@@ -6056,21 +6074,21 @@ PROCEDURE ZZ_Control:
                 RUN GetCurrentProcessId (OUTPUT ProcessHandle).
                 
                 /*kill any open bgmm.p processes that are not this one*/
-                FOR EACH buf_zz_file WHERE buf_zz_file.zz_key1 = "MediaManager" 
-                                       AND buf_zz_file.zz_key2 = "PID":
-                    IF STRING(ProcessHandle) <> buf_zz_file.zz_char[1] THEN DO:
-                        CMDLine = "taskkill /t /f /pid " + buf_zz_file.zz_char[1].
+                FOR EACH b_zz_file WHERE b_zz_file.zz_key1 = "MediaManager" 
+                                       AND b_zz_file.zz_key2 = "PID":
+                    IF STRING(ProcessHandle) <> b_zz_file.zz_char[1] THEN DO:
+                        CMDLine = "taskkill /t /f /pid " + b_zz_file.zz_char[1].
                         OS-COMMAND SILENT VALUE(CMDLine).
                     END.
-                    DELETE buf_zz_file.
+                    DELETE b_zz_file.
                 END.
                 
                 IF ProcessHandle <> 0 THEN DO:
-                    CREATE buf_zz_file.
-                    ASSIGN buf_zz_file.zz_key1    = "MediaManager"
-                           buf_zz_file.zz_key2    = "PID"
-                           buf_zz_file.zz_char[1] = STRING(ProcessHandle)
-                           buf_zz_file.zz_char[2] = STRING(TIME).
+                    CREATE b_zz_file.
+                    ASSIGN b_zz_file.zz_key1    = "MediaManager"
+                           b_zz_file.zz_key2    = "PID"
+                           b_zz_file.zz_char[1] = STRING(ProcessHandle)
+                           b_zz_file.zz_char[2] = STRING(TIME).
                 END.
             END.
         END CASE.
@@ -6092,12 +6110,12 @@ PROCEDURE ZZ_Control:
                 RUN GetCurrentProcessId (OUTPUT ProcessHandle).
                 
                 /*kill any open bgmm.p processes that are not this one*/
-                FOR EACH buf_zz_file WHERE buf_zz_file.zz_key1 = "MediaManager" AND buf_zz_file.zz_key2 = "PID":
-                    IF STRING(ProcessHandle) <> buf_zz_file.zz_char[1] THEN DO:
-                        CMDLine = "taskkill /t /f /pid " + buf_zz_file.zz_char[1].
+                FOR EACH b_zz_file WHERE b_zz_file.zz_key1 = "MediaManager" AND b_zz_file.zz_key2 = "PID":
+                    IF STRING(ProcessHandle) <> b_zz_file.zz_char[1] THEN DO:
+                        CMDLine = "taskkill /t /f /pid " + b_zz_file.zz_char[1].
                         OS-COMMAND SILENT VALUE(CMDLine).
                     END.
-                    DELETE buf_zz_file.
+                    DELETE b_zz_file.
                 END.
             END.
         END CASE.
